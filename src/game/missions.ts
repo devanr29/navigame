@@ -68,12 +68,12 @@ export const LEVELS: LevelInfo[] = [
   { n: 2, title: 'Orientasi', focus: 'Utarakan peta, orientasi medan', mechanic: 'Memutar peta, memasangkan titik ekstrem', pass: 'Peta terutarakan; 3 titik ekstrem dipasangkan benar' },
   { n: 3, title: 'Resection', focus: 'Mencari posisi sendiri', mechanic: 'Bidikan kompas, azimut balik, menggaris', pass: 'Galat posisi di bawah 100 m' },
   { n: 4, title: 'Intersection', focus: 'Mencari letak objek', mechanic: 'Azimut dari dua titik diketahui', pass: 'Objek ditemukan dalam 150 m' },
-  { n: 5, title: 'Rute navter', focus: 'Jalur dan persimpangan', mechanic: 'Rencana jalur, cek di setiap persimpangan', pass: 'Sampai tujuan; semua persimpangan dicek' },
+  { n: 5, title: 'Rute navigasi terbuka', focus: 'Jalur dan persimpangan', mechanic: 'Rencana jalur, cek di setiap persimpangan', pass: 'Sampai tujuan; semua persimpangan dicek' },
   { n: 6, title: 'Deklinasi', focus: 'Utara magnetis vs utara peta', mechanic: 'Koreksi deklinasi', pass: 'Rute terkoreksi sampai sasaran (≤30 m)' },
   { n: 7, title: 'Pacing', focus: 'Mengukur jarak dengan langkah', mechanic: 'Kalibrasi langkah per 100 m', pass: 'Berjalan 300 m dengan galat ≤10%' },
-  { n: 8, title: 'Navtup', focus: 'Hutan lebat', mechanic: 'Plotting, kunci kompas, empat peran, stringline', pass: 'Sampai sasaran menembus hutan' },
+  { n: 8, title: 'Navigasi tertutup', focus: 'Hutan lebat', mechanic: 'Plotting, kunci kompas, empat peran, stringline', pass: 'Sampai sasaran menembus hutan' },
   { n: 9, title: 'Rintangan', focus: 'Detour', mechanic: 'Detour pada azimut, pencarian akhir leg', pass: 'Sampai sasaran setelah detour' },
-  { n: 10, title: 'Misi akhir', focus: 'Navter lalu navtup', mechanic: 'Alur lengkap dengan skor akhir', pass: 'Alur lengkap selesai' },
+  { n: 10, title: 'Misi akhir', focus: 'Navigasi terbuka lalu navigasi tertutup', mechanic: 'Alur lengkap dengan skor akhir', pass: 'Alur lengkap selesai' },
 ];
 
 export abstract class Mission {
@@ -92,10 +92,17 @@ export abstract class Mission {
   declination = 0;
   /** Time (s) a confident player needs; slower costs time points. */
   par = 300;
+  /**
+   * Weather: 0 = clear day (terrain readable far away), 1 = hazy (distant hills fade early). Early
+   * levels are clear so beginners can read the terrain; later levels get hazier, as often in the field.
+   */
+  haze: number;
   protected objects: THREE.Object3D[] = [];
   protected lessons: string[] = [];
 
-  constructor(protected c: Ctx, readonly level: number) {}
+  constructor(protected c: Ctx, readonly level: number) {
+    this.haze = level <= 4 ? 0 : level <= 7 ? 0.35 : 0.6;
+  }
 
   abstract start(): void;
   update(_dt: number) {}
@@ -181,19 +188,6 @@ export abstract class Mission {
     return this.c.map.lines.filter((l) => Math.hypot(l.x - p[0], l.z - p[1]) <= r);
   }
 
-  /** Readings that are paired, with correct back azimuths, drawn from their symbols. */
-  protected resectionProgress() {
-    const paired = this.c.notebook.readings.filter((r) => r.pairedWith >= 0);
-    const symbols = new Set(paired.map((r) => r.pairedWith));
-    const backs = paired.filter((r) => r.backTyped !== null && Math.abs(r.backTyped - backAzimuth(r.azimuth)) < 0.5).length;
-    let drawn = 0;
-    for (const id of symbols) {
-      const l = this.c.w.landmarks[id];
-      if (l && this.linesFrom([l.x, l.z]).length) drawn++;
-    }
-    return { paired: symbols.size, backs, drawn, list: paired };
-  }
-
   /** Lesson when the two paired readings cross at a narrow angle (weak fix). */
   protected crossingTip() {
     const ps = this.c.notebook.readings.filter((r) => r.pairedWith >= 0);
@@ -276,15 +270,16 @@ class Resection extends Mission {
     this.par = 600;
     this.briefing = [
       'Kamu tidak tahu sedang berada di mana. Tentukan posisimu dengan resection: dari dua titik ekstrem yang terlihat dan sudah kamu kenali di peta.',
-      'Bidik tiap titik ekstrem dengan kompas, pasangkan dengan simbolnya di Catatan, hitung azimut baliknya sendiri, lalu gariskan azimut balik itu dari simbol dengan busur.',
-      'Titik potong garis adalah posisimu. Tandai, lalu kirim.',
+      '1. Utarakan peta: lihat derajat kompas di atas layar, buka peta, putar peta dengan dua jari sampai utaranya searah utara sebenarnya.',
+      '2. Bidik titik ekstrem pertama dengan kompas. Di Catatan, pasangkan bidikan dengan simbolnya di peta dan tulis azimut baliknya. Di peta, letakkan busur di simbol itu dan gariskan azimut baliknya.',
+      '3. Ulangi langkah 2 untuk titik ekstrem kedua.',
+      '4. Tandai posisimu di peta, yaitu titik potong kedua garis, lalu kirim.',
     ];
     this.objectives = [
-      { text: 'Utarakan peta', done: false, optional: true },
-      { text: 'Bidik dan pasangkan 2 titik ekstrem', done: false },
-      { text: 'Tulis azimut balik yang benar untuk 2 bidikan', done: false },
-      { text: 'Gariskan azimut balik dari 2 simbol (busur → Gariskan)', done: false },
-      { text: 'Tandai posisimu di peta', done: false },
+      { text: 'Utarakan peta', done: false },
+      { text: 'Titik ekstrem 1: bidik, pasangkan, azimut balik, gariskan', done: false },
+      { text: 'Titik ekstrem 2: bidik, pasangkan, azimut balik, gariskan', done: false },
+      { text: 'Tandai posisimu di peta (perpotongan garis)', done: false },
     ];
   }
 
@@ -293,10 +288,22 @@ class Resection extends Mission {
     this.time += dt;
     const o = this.objectives;
     if (this.orientDone()) o[0].done = true;
-    const r = this.resectionProgress();
-    o[1].done = r.paired >= 2;
-    o[2].done = r.backs >= 2;
-    o[3].done = r.drawn >= 2;
+    // Steps per titik ekstrem, in the order the player paired them.
+    const rs = this.c.notebook.readings;
+    const symbols: number[] = [];
+    for (const r of rs) if (r.pairedWith >= 0 && !symbols.includes(r.pairedWith)) symbols.push(r.pairedWith);
+    const hits = rs.filter((r) => r.target >= 0).length;
+    const tick = (b: boolean) => (b ? '✓' : '○');
+    for (let k = 0; k < 2; k++) {
+      const id = symbols[k];
+      const l = id === undefined ? undefined : this.c.w.landmarks[id];
+      const aimed = hits > k || id !== undefined;
+      const paired = id !== undefined;
+      const back = paired && rs.some((r) => r.pairedWith === id && r.backTyped !== null && Math.abs(r.backTyped - backAzimuth(r.azimuth)) < 0.5);
+      const line = !!l && this.linesFrom([l.x, l.z]).length > 0;
+      o[1 + k].text = `Titik ekstrem ${k + 1}${l ? ` (${l.name})` : ''}: bidik ${tick(aimed)} pasang ${tick(paired)} balik ${tick(back)} garis ${tick(line)}`;
+      o[1 + k].done = aimed && paired && back && line;
+    }
   }
 
   actions(): Action[] {
@@ -306,10 +313,11 @@ class Resection extends Mission {
   private async submit() {
     const m = await this.markMyPosition();
     if (!m || this.result) return;
-    this.objectives[4].done = true;
+    this.objectives[3].done = true;
     const errM = M(m.err);
     this.revealTruth([this.c.player.x, this.c.player.z], m.p, `Posisi sebenarnya (galat ${errM} m)`);
     this.crossingTip();
+    if (!this.objectives[0].done) this.lessons.push('Peta belum diutarakan. Utarakan peta dulu, supaya arah di peta sama dengan arah di medan dan titik ekstrem mudah dikenali.');
     const p = this.pairs();
     if (p.wrong) this.lessons.push('Ada bidikan yang dipasangkan dengan simbol yang salah, sehingga garisnya berangkat dari tempat yang salah.');
     this.lessons.push('Resection = mencari posisi diri sendiri, memakai azimut BALIK dari titik ekstrem yang diketahui.');
@@ -425,7 +433,7 @@ class Route extends Mission {
       'Di setiap persimpangan, berhenti dan cek posisi (Tandai posisiku) sebelum memilih cabang. Salah cabang baru ketahuan di pengecekan berikutnya.',
     ];
     this.objectives = [
-      { text: 'Utarakan peta', done: false, optional: true },
+      { text: 'Utarakan peta', done: false },
       { text: 'Resection di titik awal (Tandai posisiku)', done: false },
       { text: 'Rencanakan jalur dengan pensil', done: false, optional: true },
       ...r.crossroads.map((_, k) => ({ text: `Cek posisi di persimpangan ${k + 1}`, done: false })),
@@ -452,7 +460,7 @@ class Route extends Mission {
       const all = n === this.checked.length;
       if (!all) this.lessons.push('Ada persimpangan yang dilewati tanpa cek posisi. Di lapangan, salah cabang paling mudah terjadi di persimpangan.');
       if (this.startErr !== null && this.startErr > 100) this.lessons.push(`Resection awal meleset ${this.startErr} m; perbaiki dengan memilih titik ekstrem yang berselisih arah mendekati 90°.`);
-      this.lessons.push('Navter: posisi dipastikan dengan resection di titik awal dan di setiap persimpangan.');
+      this.lessons.push('Navigasi terbuka: posisi dipastikan dengan resection di titik awal dan di setiap persimpangan.');
       this.finish(all, 40 + 35 * (n / this.checked.length) + this.timeScore(25), [
         ['Persimpangan dicek', `${n} dari ${this.checked.length}`],
         ['Galat resection awal', this.startErr === null ? '—' : `${this.startErr} m`],
@@ -661,7 +669,7 @@ class Navtup extends Mission {
     const { sites } = this.c;
     this.setup(sites.forest.start, sites.forest.target, this.level === 9);
     this.briefing = [
-      `Kamu berdiri di tepi hutan, di titik akhir navter (${fmtCoord(this.startP)}): posisi ini sudah dipastikan dengan resection terakhir.`,
+      `Kamu berdiri di tepi hutan, di titik akhir navigasi terbuka (${fmtCoord(this.startP)}): posisi ini sudah dipastikan dengan resection terakhir.`,
       `Sasaran: pos berbendera oranye di dalam hutan, di ${fmtCoord(this.target)}. Tandai di peta sebelum berangkat.`,
       'Di dalam hutan tidak ada titik ekstrem yang bisa dibidik. Analisis kontur di sepanjang garis, plot garis lurus ke sasaran, ukur azimut (busur) dan panjangnya (penggaris), lalu ubah jarak menjadi target langkah. Di hutan dan tanjakan langkah lebih pendek: tambahkan sekitar 20–30% dari hitungan medan datar.',
       'Kunci kompas, atur posisi tim, lalu menerabas. Sebagai compasman, beri aba-aba kiri/kanan agar penerabas tetap di azimut.',
@@ -677,13 +685,13 @@ class Navtup extends Mission {
     player.teleport(start[0], start[1], azimuthTo(start[0], start[1], target[0], target[1]) + 35);
     this.place(patok(), start);
     this.place(targetPost(), target);
-    this.c.map.symbols = [{ x: start[0], z: start[1], label: 'Titik akhir navter', id: 221 }];
+    this.c.map.symbols = [{ x: start[0], z: start[1], label: 'Titik akhir navigasi terbuka', id: 221 }];
     this.destination = { p: target, label: 'Pos sasaran' };
     this.showPace = true;
     this.par = 720;
     if (obstacle) this.buildObstacle();
     this.objectives = [
-      { text: 'Plot garis dari titik akhir navter ke sasaran (busur → Gariskan)', done: false, optional: true },
+      { text: 'Plot garis dari titik akhir navigasi terbuka ke sasaran (busur → Gariskan)', done: false, optional: true },
       { text: 'Kunci kompas dan isi target langkah', done: false },
       { text: 'Atur posisi tim', done: false },
       ...(obstacle ? [{ text: 'Detour melewati semak berduri', done: false }] : []),
@@ -844,11 +852,11 @@ class Navtup extends Mission {
       ['Langkah saat akhir leg', `${this.stepsAtEnd} (target ${this.targetSteps ?? '—'}, hitungan datar ${idealSteps})`],
     ];
     if (this.locked !== null && Math.abs(angleDiff(this.locked, magAz)) > 3) {
-      this.lessons.push(`Azimut yang dikunci berbeda ${Math.round(Math.abs(angleDiff(this.locked, magAz)))}° dari garis plot. Ukur ulang dengan busur dari titik akhir navter ke sasaran.`);
+      this.lessons.push(`Azimut yang dikunci berbeda ${Math.round(Math.abs(angleDiff(this.locked, magAz)))}° dari garis plot. Ukur ulang dengan busur dari titik akhir navigasi terbuka ke sasaran.`);
     }
     if (this.stepsAtEnd > idealSteps * 1.05) this.lessons.push('Hitungan langkah lebih banyak dari hitungan di medan datar: tanjakan dan semak memperpendek langkah.');
     if (this.withObstacle) this.lessons.push(this.detourDone ? 'Detour berhasil: langkah sepanjang azimut tetap dihitung, langkah ke samping dibayar kembali.' : 'Rintangan tidak dilewati dengan detour.');
-    this.lessons.push('Navtup: tanpa titik ekstrem, tim hanya mengandalkan azimut terkunci dan hitungan langkah.');
+    this.lessons.push('Navigasi tertutup: tanpa titik ekstrem, tim hanya mengandalkan azimut terkunci dan hitungan langkah.');
     const lockPts = this.locked === null ? 0 : 20 * clamp01(1 - (Math.abs(angleDiff(this.locked, magAz)) - 1) / 6);
     const pacePts = this.targetSteps ? 15 * clamp01(1 - Math.abs(this.stepsAtEnd - this.targetSteps) / (this.targetSteps * 0.3)) : 0;
     const passed = !this.withObstacle || this.detourDone;
@@ -882,7 +890,7 @@ class FinalMission extends Navtup {
       'Dari titik itu, plot garis lurus ke sasaran, kunci kompas, hitung target langkah (tambahkan sekitar 20–30% untuk hutan dan tanjakan), atur tim, dan menerabas.',
     ];
     this.objectives = [
-      { text: 'Utarakan peta', done: false, optional: true },
+      { text: 'Utarakan peta', done: false },
       { text: 'Resection di titik awal (Tandai posisiku)', done: false },
       { text: 'Resection terakhir di tepi hutan', done: false },
       { text: 'Kunci kompas dan isi target langkah', done: false },
@@ -948,7 +956,7 @@ class FinalMission extends Navtup {
     const r = this.result!;
     const e1 = this.err1 ?? 999, e2 = this.err2 ?? 999;
     r.stats.unshift(['Galat resection awal', `${this.err1 ?? '—'} m`], ['Galat resection terakhir', `${this.err2 ?? '—'} m`]);
-    if (e2 > 80) r.lessons.splice(before, 0, 'Resection terakhir meleset jauh, sehingga garis navtup berangkat dari titik yang salah. Hasil akhir sangat bergantung pada resection terakhir.');
+    if (e2 > 80) r.lessons.splice(before, 0, 'Resection terakhir meleset jauh, sehingga garis navigasi tertutup berangkat dari titik yang salah. Hasil akhir sangat bergantung pada resection terakhir.');
     // Final score: blend navtup score with both resections.
     r.score = Math.round(0.6 * r.score + 20 * clamp01(1 - e1 / 150) + 20 * clamp01(1 - e2 / 150));
     r.passed = true;

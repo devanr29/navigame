@@ -6,7 +6,7 @@ import { makeRng } from '../gen/noise';
 import { MapView } from '../map/mapView';
 import { Input } from '../player/input';
 import { Player } from '../player/player';
-import { Compass } from '../tools/compass';
+import { Compass, HeadingStrip } from '../tools/compass';
 import { azimuthOfYaw, magneticOf, Sight } from '../tools/sight';
 import { Notebook } from '../ui/notebook';
 import { CharacterPreview } from '../ui/preview';
@@ -22,9 +22,11 @@ import type { P, Sites } from './sites';
 import { ALL_TOOLS, loadProgress, saveProgress, TOOLS, type Reading, type ToolId } from './state';
 import { Team } from './team';
 
-// View distances in blocks (1 block = 2.5 m). Open terrain: far with light haze (about 1 km, so
-// landmarks across the map can be sighted). Forest: heavy fog under the canopy.
-const OPEN_NEAR = 120, OPEN_FAR = 420;
+// View distances in blocks (1 block = 2.5 m). Open terrain: about 1 km, so landmarks across the map
+// can be sighted. Where the haze starts depends on the mission's weather (Mission.haze): clear days in
+// the early levels so the terrain can be read, hazier days later, as in the field. The far limit stays
+// the same, so the same landmarks can be sighted in any weather. Forest: heavy fog under the canopy.
+const CLEAR_NEAR = 260, HAZY_NEAR = 90, OPEN_FAR = 420;
 const FOREST_NEAR = 3, FOREST_FAR = 30;
 const LOAD_RADIUS = OPEN_FAR + 16;
 
@@ -54,6 +56,7 @@ export class Game {
   private screens: Screens;
   private progress = loadProgress();
   private arm = makeFirstPersonArm();
+  private heading = new HeadingStrip($<HTMLCanvasElement>('heading'));
 
   private mode: 'menu' | 'field' = 'menu';
   private mission: Mission | null = null;
@@ -80,7 +83,7 @@ export class Game {
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.scene.background = this.sky;
-    this.scene.fog = new THREE.Fog(this.sky, OPEN_NEAR, OPEN_FAR);
+    this.scene.fog = new THREE.Fog(this.sky, CLEAR_NEAR, OPEN_FAR);
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, OPEN_FAR + 20);
     this.camera.add(this.arm);
     this.scene.add(this.camera);
@@ -175,8 +178,12 @@ export class Game {
     const info = LEVELS[n - 1];
     const quickDebug = this.opts.debugLevel === n;
     const rnd = makeRng((Date.now() & 0xffffff) ^ (n * 7919));
-    this.tools = quickDebug ? new Set(ALL_TOOLS) : await this.screens.packing(info, n >= 3);
+    const packed = quickDebug ? { tools: new Set(ALL_TOOLS), extras: [] } : await this.screens.packing(info, n >= 3, rnd);
+    this.tools = packed.tools;
     const missing = TOOLS.filter((t) => !this.tools.has(t.id)).map((t) => t.name);
+    const extraLessons = packed.extras.length
+      ? [`Barang yang bukan alat navigasi ikut dikemas: ${packed.extras.map((d) => d.name).join(', ')}.`, ...packed.extras.map((d) => d.why)]
+      : [];
     this.map.resetSheet();
     this.map.setTools(this.tools);
     this.notebook.reset();
@@ -190,9 +197,13 @@ export class Game {
       const score = Math.round((100 * res.firstTry) / res.total);
       const result = {
         passed: true,
-        score: missing.length ? Math.round(score * 0.8) : score,
-        stats: [['Benar pada percobaan pertama', `${res.firstTry} dari ${res.total}`]] as [string, string][],
+        score: Math.round(score * (missing.length ? 0.8 : 1) * (packed.extras.length ? 0.9 : 1)),
+        stats: [
+          ['Benar pada percobaan pertama', `${res.firstTry} dari ${res.total}`],
+          ['Barang salah kemas', String(packed.extras.length)],
+        ] as [string, string][],
         lessons: [
+          ...extraLessons,
           'Koordinat ditulis lintang dulu, lalu bujur. 1 menit = 60 detik.',
           'Jarak di peta × skala = jarak sebenarnya: 1 cm pada 1:25.000 = 250 m.',
           'Lembahan: kontur melengkung ke arah puncak. Punggungan: kontur melengkung menjauhi puncak.',
@@ -215,6 +226,7 @@ export class Game {
       await this.screens.quiz(`Level ${n} · Cek cepat`, [q], () => this.peekMap());
       const extra: string[] = [];
       if (missing.length) extra.push(`Alat tertinggal: ${missing.join(', ')}.`);
+      if (mission.haze > 0) extra.push('Cuaca hari ini berkabut tipis: bukit dan titik ekstrem yang jauh tampak samar, seperti sering terjadi di lapangan. Bidik dengan teliti.');
       await this.screens.briefing(info, mission.briefing, extra);
     }
     this.screens.hide();
@@ -227,6 +239,7 @@ export class Game {
 
     await this.runField(mission);
     const r = mission.result!;
+    r.lessons.unshift(...extraLessons);
     this.recordResult(n, r.passed, r.score);
     const out = await this.screens.debrief(info, r, missing, n < 10, () => this.peekMap());
     mission.cleanup();
@@ -243,7 +256,8 @@ export class Game {
   /** Shows the map over a menu screen (read-only use: quiz, debrief). */
   private peekMap(): Promise<void> {
     return new Promise<void>((resolve) => {
-      this.screens.hide();
+      // Only hide the menu screen: its content (the quiz question, the debrief) must still be there
+      // when the map is closed.
       const prevRoot = $('screen');
       prevRoot.hidden = true;
       this.openMap(true);
@@ -389,7 +403,11 @@ export class Game {
     player.update(dt, input);
     player.applyCamera(camera);
     this.arm.visible = !this.compass.raised;
-    this.compass.update(dt, magneticOf(azimuthOfYaw(player.yaw)));
+    const facing = magneticOf(azimuthOfYaw(player.yaw));
+    this.compass.update(dt, facing);
+    const headingEl = $('heading');
+    headingEl.hidden = this.compass.raised || !this.tools.has('kompas');
+    if (!headingEl.hidden) this.heading.update(facing, this.compass.locked);
 
     // pace counter: climb measured on the smooth terrain surface, not the 2.5 m block steps
     const N = this.w.size;
@@ -413,7 +431,8 @@ export class Game {
     const target = this.forestAmount();
     this.forest += (target - this.forest) * Math.min(1, dt * 1.5);
     const fog = this.scene.fog as THREE.Fog;
-    fog.near = OPEN_NEAR + (FOREST_NEAR - OPEN_NEAR) * this.forest;
+    const openNear = CLEAR_NEAR + (HAZY_NEAR - CLEAR_NEAR) * (m?.haze ?? 0);
+    fog.near = openNear + (FOREST_NEAR - openNear) * this.forest;
     fog.far = OPEN_FAR + (FOREST_FAR - OPEN_FAR) * this.forest;
     this.sky.copy(this.skyOpen).lerp(this.skyForest, this.forest);
     fog.color.copy(this.sky);
@@ -543,7 +562,15 @@ export class Game {
     if (open) {
       $('toast').hidden = true;
       document.exitPointerLock?.();
-      this.map.orientFacing = this.mission?.orientCheck && this.mode === 'field' ? azimuthOfYaw(this.player.yaw) : null;
+      const inField = this.mode === 'field';
+      this.map.orientFacing = this.mission?.orientCheck && inField ? azimuthOfYaw(this.player.yaw) : null;
+      this.map.heading = inField && this.tools.has('kompas') ? magneticOf(azimuthOfYaw(this.player.yaw)) : null;
+      // Readings that are ready to plot: paired with a symbol and with a back azimuth written down.
+      const pad = (a: number) => `${String(Math.round(a)).padStart(3, '0')}°`;
+      this.map.setNotes(inField ? this.notebook.readings
+        .map((r, i) => ({ r, i }))
+        .filter(({ r }) => r.pairedWith >= 0 && r.backTyped !== null)
+        .map(({ r, i }) => `#${i + 1} ${this.notebook.symbolName(r.pairedWith)}: az ${pad(r.azimuth)} · balik ${pad(r.backTyped!)}`) : []);
       this.map.show();
       this.mission?.onMapOpen();
     } else {

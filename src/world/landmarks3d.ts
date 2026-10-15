@@ -90,6 +90,15 @@ export function buildLandmarks(list: Landmark[]): LandmarkObjects {
         }
         break;
       }
+      case 'monument': {
+        // 11 m white obelisk on a stepped base with a red cap, standing alone on a bare hilltop.
+        g.box(-1.1, 0, -1.1, 1.1, 0.4, 1.1, rgb(0x9a9a92));
+        g.box(-0.75, 0.4, -0.75, 0.75, 0.8, 0.75, rgb(0xb4b4ac));
+        g.box(-0.45, 0.8, -0.45, 0.45, 2.6, 0.45, rgb(0xf2f0e8));
+        g.box(-0.35, 2.6, -0.35, 0.35, 4.0, 0.35, rgb(0xeae8e0));
+        g.box(-0.22, 4.0, -0.22, 0.22, 4.5, 0.22, rgb(0xd0202a));
+        break;
+      }
     }
     obj.add(new THREE.Mesh(g.build(), mat));
     obj.position.set(l.x, l.y, l.z);

@@ -164,9 +164,9 @@ export function findSites(w: WorldData): Sites {
     return out;
   };
 
-  // Level 10 start: open spot 120–240 blocks from the forest with a good resection.
+  // Level 10 start: open spot 60–160 blocks (150–400 m) from the forest with a good resection.
   const finalStart = pickSpot(
-    (s) => { const d = toForest[idx(s.x, s.z)]; return d >= 120 && d <= 240 && s.q >= 40; },
+    (s) => { const d = toForest[idx(s.x, s.z)]; return d >= 60 && d <= 160 && s.q >= 40; },
     (s) => s.q + rng() * 8,
     resection,
   );
@@ -240,6 +240,8 @@ export function findSites(w: WorldData): Sites {
     for (let d = 1; d < L && ok; d += 1) {
       const x = s[0] + ((t[0] - s[0]) * d) / L, z = s[1] + ((t[1] - s[1]) * d) / L;
       if (!inside(x, z, 3) || w.water[idx(x, z)] >= 0) { ok = false; break; }
+      // No tree on the line either: this leg teaches declination, detours come in level 9.
+      if (w.solid[idx(x, z)] || w.solid[idx(x + 1, z)] || w.solid[idx(x - 1, z)] || w.solid[idx(x, z + 1)] || w.solid[idx(x, z - 1)]) { ok = false; break; }
       const h = w.height[idx(x, z)];
       if (Math.abs(h - prevH) > 1) ok = false;
       prevH = h;
@@ -271,10 +273,50 @@ export function findSites(w: WorldData): Sites {
   }
   const paceCourse = pace ?? { start: w.spawn, end: [w.spawn[0] + 40, w.spawn[1]] as P };
 
-  // ---- navter route: from the trail start, over both crossroads, to a point on the far trail
+  // ---- open-navigation route over both crossroads, kept short so a lesson fits in a class session
+  // (about 650 m): start 50–110 blocks before the first crossroad, at the trail point with the best
+  // resection, and end about 80 blocks past the second crossroad on the far trail.
+  const pointAlong = (poly: number[], d: number): P => {
+    let acc = 0;
+    for (let k = 2; k < poly.length; k += 2) {
+      const seg = Math.hypot(poly[k] - poly[k - 2], poly[k + 1] - poly[k - 1]);
+      if (acc + seg >= d) {
+        const t = seg > 0 ? (d - acc) / seg : 0;
+        return [poly[k - 2] + (poly[k] - poly[k - 2]) * t, poly[k - 1] + (poly[k + 1] - poly[k - 1]) * t];
+      }
+      acc += seg;
+    }
+    return [poly[poly.length - 2], poly[poly.length - 1]];
+  };
+  const polyLen = (poly: number[]) => {
+    let L = 0;
+    for (let k = 2; k < poly.length; k += 2) L += Math.hypot(poly[k] - poly[k - 2], poly[k + 1] - poly[k - 1]);
+    return L;
+  };
   const far = w.trails[w.trails.length - 1];
-  const fk = Math.floor((far.length / 2) * 0.6);
-  const route = { start: w.spawn, dest: [far[fk * 2], far[fk * 2 + 1]] as P, crossroads: w.junctions };
+  const J1 = w.junctions[0];
+  // The start needs two visible titik ekstrem for the opening resection. Candidates: points on any
+  // trail that ends at the first crossroad, preferring 50–110 blocks before it (a small penalty per
+  // extra block); failing that, an open spot near a trail 40–160 blocks from the crossroad.
+  let routeStart: P = w.spawn, bestScore = -Infinity;
+  for (const t of w.trails) {
+    const L = polyLen(t);
+    if (dist([t[t.length - 2], t[t.length - 1]], J1) > 3) continue;
+    for (let back = 50; back <= L; back += 6) {
+      const p = pointAlong(t, Math.max(0, L - back));
+      const q = pairQuality(p[0], p[1], visible(p[0], p[1]));
+      const score = q >= 20 ? q - 0.5 * Math.max(0, back - 110) : -Infinity;
+      if (score > bestScore) { bestScore = score; routeStart = p; }
+    }
+  }
+  if (bestScore === -Infinity) {
+    routeStart = pickSpot(
+      (s) => { const d = dist([s.x, s.z], J1); return d >= 40 && d <= 160 && s.q >= 20 && nearSurface(s.x, s.z, 10, Surface.Path); },
+      (s) => s.q - 0.3 * dist([s.x, s.z], J1),
+      w.spawn,
+    );
+  }
+  const route = { start: routeStart, dest: pointAlong(far, Math.min(80, polyLen(far) * 0.6)), crossroads: w.junctions };
 
   return {
     orient,

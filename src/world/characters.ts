@@ -211,8 +211,10 @@ export function makeCharacter(role: Role): Character {
   armR.add(item);
 
   group.add(legL, legR, torso, head, hair, armL, armR, scarfG);
-  if (role === 'compasman') armR.rotation.x = -1.2; // compass raised toward the eye
-  if (role === 'stringlineman') armR.rotation.x = -0.5;
+  // The body faces −z, so a positive x rotation swings the hanging arm forward (a negative one would
+  // swing it backward, over the scarf's back point).
+  if (role === 'compasman') armR.rotation.x = 1.2; // compass raised toward the eye
+  if (role === 'stringlineman') armR.rotation.x = 0.5;
 
   let phase = 0;
   return {

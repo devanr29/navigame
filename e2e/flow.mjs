@@ -26,7 +26,10 @@ await page.getByRole('button', { name: 'Mulai' }).click();
 
 // ---- level 3 with only map + compass packed
 await page.locator('.level-card:nth-child(3)').click();
-for (const name of ['Peta', 'Kompas']) await page.locator('.pack-items .pack-item', { hasText: name }).first().click();
+// match the item name exactly: descriptions mention other tools (e.g. "Menahan peta…")
+for (const name of ['Peta', 'Kompas']) await page.locator('.pack-items .pack-item').filter({ has: page.locator('b', { hasText: new RegExp(`^${name}$`) }) }).click();
+// a decoy (not a navigation tool) packed by mistake shows up in the debrief
+await page.locator('.pack-items .pack-item').filter({ has: page.locator('b', { hasText: /^(GPS|Senter|Spidol|Kalkulator|Peluit|Teropong|Jas hujan|Busur 180°)$/ }) }).first().click();
 await page.getByRole('button', { name: 'Berangkat' }).click();
 check('missing-tools warning shown', /Belum dikemas/.test(await page.locator('.warn').first().textContent()));
 await page.getByRole('button', { name: 'Berangkat' }).click();
@@ -46,13 +49,14 @@ await page.locator('#btn-menu').dispatchEvent('pointerdown');
 await page.waitForSelector('.score', { timeout: 10000 });
 check('quitting shows the debrief', /Belum lulus/.test(await page.locator('h2').textContent()));
 check('debrief lists missing tools', /Alat yang tertinggal/.test(await page.locator('.brief-text').textContent()));
+check('debrief explains the decoy', /bukan alat navigasi/.test(await page.locator('.brief-text').textContent()));
 await page.getByRole('button', { name: 'Menu' }).click();
 await page.waitForSelector('.level-grid');
 check('back to level select', true);
 
 // ---- level 5 with all tools: destination marking from coordinates
 await page.locator('.level-card:nth-child(5)').click();
-await page.getByRole('button', { name: 'Kemas semua' }).click();
+await page.getByRole('button', { name: 'Kemas alat navigasi' }).click();
 await page.getByRole('button', { name: 'Berangkat' }).click();
 await answerQuiz();
 await page.getByRole('button', { name: 'Lanjut' }).click();

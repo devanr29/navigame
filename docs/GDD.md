@@ -270,7 +270,7 @@ The game must run smoothly on a mid-range Android phone in the browser, so the w
 - Line-of-sight raycast for compass sighting.
 - Progress saved in the browser's local storage.
 - Target: 30 fps or better on a mid-range phone.
-- UI language: Indonesian, using the material's terms (navter, navtup, karvak, utarakan peta), with an English toggle later.
+- UI language: Indonesian, using the material's terms (navigasi terbuka, navigasi tertutup, karvak, utarakan peta), with an English toggle later. On screen, navigasi terbuka and navigasi tertutup are always written out in full, never shortened to navter/navtup.
 
 ## MVP scope and build order for Claude Code
 

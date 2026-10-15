@@ -81,64 +81,10 @@ export class Compass {
     const W = this.tape.clientWidth;
     const H = this.tape.clientHeight;
     const a = norm360(this.needle + this.jitter);
-    const pxPerDeg = W / (2 * SPAN);
     const tapeH = 40;
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(12, 18, 14, 0.72)';
-    roundRect(ctx, 0, 0, W, tapeH, 8);
-    ctx.fill();
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, W, tapeH);
-    ctx.clip();
-    ctx.strokeStyle = '#f4f1e8';
-    ctx.fillStyle = '#f4f1e8';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    const first = Math.ceil((a - SPAN - 2) / 5) * 5;
-    for (let d = first; d <= a + SPAN + 2; d += 5) {
-      const x = W / 2 + (d - a) * pxPerDeg;
-      const dn = norm360(d);
-      const major = dn % 30 === 0;
-      const mid = dn % 10 === 0;
-      ctx.lineWidth = major ? 2 : 1;
-      ctx.beginPath();
-      ctx.moveTo(x, tapeH);
-      ctx.lineTo(x, tapeH - (major ? 14 : mid ? 10 : 6));
-      ctx.stroke();
-      const label = CARDINAL[dn] ?? (major ? String(dn) : '');
-      if (label) {
-        ctx.font = CARDINAL[dn] ? '700 15px system-ui, sans-serif' : '600 12px system-ui, sans-serif';
-        ctx.fillStyle = dn === 0 ? '#ff5a4e' : '#f4f1e8';
-        ctx.fillText(label, x, tapeH - 18);
-      }
-    }
-    if (this.locked !== null) {
-      const off = angleDiff(this.locked, a);
-      if (Math.abs(off) <= SPAN) {
-        const x = W / 2 + off * pxPerDeg;
-        ctx.fillStyle = '#3fdc6a';
-        ctx.beginPath();
-        ctx.moveTo(x - 8, tapeH);
-        ctx.lineTo(x + 8, tapeH);
-        ctx.lineTo(x, tapeH - 12);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-    ctx.restore();
-
-    // index mark
-    ctx.fillStyle = '#f5d21e';
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - 7, 0);
-    ctx.lineTo(W / 2 + 7, 0);
-    ctx.lineTo(W / 2, 10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillRect(W / 2 - 1, 0, 2, tapeH);
+    drawTape(ctx, W, tapeH, a, this.locked, SPAN);
 
     // digital readout
     const txt = `${String(this.shown()).padStart(3, '0')}°`;
@@ -161,6 +107,109 @@ export class Compass {
 }
 
 const CARDINAL: Record<number, string> = { 0: 'U', 45: 'TL', 90: 'T', 135: 'TG', 180: 'S', 225: 'BD', 270: 'B', 315: 'BL' };
+
+/** Compass card strip centred on azimuth `a`, `span` degrees either side, with the index line and the locked bearing. */
+function drawTape(ctx: CanvasRenderingContext2D, W: number, tapeH: number, a: number, locked: number | null, span: number) {
+  const pxPerDeg = W / (2 * span);
+  const big = tapeH >= 36;
+  ctx.fillStyle = 'rgba(12, 18, 14, 0.72)';
+  roundRect(ctx, 0, 0, W, tapeH, 8);
+  ctx.fill();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, W, tapeH);
+  ctx.clip();
+  ctx.strokeStyle = '#f4f1e8';
+  ctx.fillStyle = '#f4f1e8';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  const first = Math.ceil((a - span - 2) / 5) * 5;
+  for (let d = first; d <= a + span + 2; d += 5) {
+    const x = W / 2 + (d - a) * pxPerDeg;
+    const dn = norm360(d);
+    const major = dn % 30 === 0;
+    const mid = dn % 10 === 0;
+    ctx.lineWidth = major ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(x, tapeH);
+    ctx.lineTo(x, tapeH - (major ? 14 : mid ? 10 : 6) * (big ? 1 : 0.6));
+    ctx.stroke();
+    const label = CARDINAL[dn] ?? (major ? String(dn) : '');
+    if (label) {
+      const px = big ? (CARDINAL[dn] ? 15 : 12) : (CARDINAL[dn] ? 12 : 10);
+      ctx.font = `${CARDINAL[dn] ? 700 : 600} ${px}px system-ui, sans-serif`;
+      ctx.fillStyle = dn === 0 ? '#ff5a4e' : '#f4f1e8';
+      ctx.fillText(label, x, tapeH - (big ? 18 : 11));
+    }
+  }
+  if (locked !== null) {
+    const off = angleDiff(locked, a);
+    if (Math.abs(off) <= span) {
+      const x = W / 2 + off * pxPerDeg;
+      ctx.fillStyle = '#3fdc6a';
+      ctx.beginPath();
+      ctx.moveTo(x - 8, tapeH);
+      ctx.lineTo(x + 8, tapeH);
+      ctx.lineTo(x, tapeH - 12);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  // index mark
+  ctx.fillStyle = '#f5d21e';
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - 7, 0);
+  ctx.lineTo(W / 2 + 7, 0);
+  ctx.lineTo(W / 2, 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(W / 2 - 1, 0, 2, tapeH);
+}
+
+/**
+ * Small heading strip at the top of the field view: the compass is always at hand, so its reading is
+ * always on screen (the full sighting view replaces it while the compass is raised).
+ */
+export class HeadingStrip {
+  private ctx: CanvasRenderingContext2D;
+  private shown = -1;
+  private lockedShown: number | null = null;
+
+  constructor(private canvas: HTMLCanvasElement) {
+    this.ctx = canvas.getContext('2d')!;
+  }
+
+  /** `az` is the magnetic azimuth faced; `locked` the locked bearing or null. */
+  update(az: number, locked: number | null) {
+    const a = Math.round(norm360(az) * 2) / 2;
+    if (a === this.shown && locked === this.lockedShown) return;
+    const r = this.canvas.getBoundingClientRect();
+    if (r.width === 0) return;
+    this.shown = a;
+    this.lockedShown = locked;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    const ctx = this.ctx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, r.width, r.height);
+    const tapeH = 24;
+    drawTape(ctx, r.width, tapeH, a, locked, 50);
+    const txt = `${String(Math.round(a) % 360).padStart(3, '0')}°`;
+    ctx.font = '700 15px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const tw = ctx.measureText(txt).width + 14;
+    ctx.fillStyle = 'rgba(12, 18, 14, 0.72)';
+    roundRect(ctx, r.width / 2 - tw / 2, tapeH + 3, tw, 21, 5);
+    ctx.fill();
+    ctx.fillStyle = '#f5d21e';
+    ctx.fillText(txt, r.width / 2, tapeH + 6);
+  }
+}
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();

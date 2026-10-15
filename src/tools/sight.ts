@@ -87,6 +87,8 @@ export function landmarkTarget(l: Landmark, id: number): SightTarget {
         ...base, pts: [[0, 5, 0], [0, 7.5, 0], [3.4, 4.5, 0], [-3.4, 4.5, 0], [0, 4.5, 3.4], [0, 4.5, -3.4]],
         halfWidth: 3.5, bottom: 0, top: 8,
       };
+    case 'monument':
+      return { ...base, pts: [[0, 1, 0], [0, 2.5, 0], [0, 4, 0]], halfWidth: 1.2, bottom: 0, top: 4.6 };
   }
 }
 

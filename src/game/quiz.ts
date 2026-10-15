@@ -55,7 +55,7 @@ export function makeQuestion(kind: Question['kind'], w: WorldData, map: MapView,
       const valley = rnd() < 0.5;
       return {
         kind,
-        text: 'Puncak ada di bagian atas gambar (angka kontur makin besar ke atas). Bentuk kontur ini menunjukkan…',
+        text: 'Puncak ada di bagian atas gambar (angka kontur makin besar ke atas). Titik merah berada di…',
         options: ['Lembahan', 'Punggungan'],
         answer: valley ? 0 : 1,
         usesMap: false,
@@ -70,7 +70,11 @@ export function makeQuestion(kind: Question['kind'], w: WorldData, map: MapView,
   }
 }
 
-/** Nested V-shaped contours: a valley's V points toward the peak (up), a ridge's V points away (down). */
+/**
+ * Nested V-shaped contours: a valley's V points toward the peak (up), a ridge's V points away (down).
+ * Beside a valley there are ridges and beside a ridge there are valleys, so the answer depends on where
+ * you look: a red dot marks the spot being asked about, on the line through the bends of the Vs.
+ */
 function drawContourShape(c: HTMLCanvasElement, valley: boolean) {
   const g = c.getContext('2d')!;
   const W = c.width, H = c.height;
@@ -97,4 +101,16 @@ function drawContourShape(c: HTMLCanvasElement, valley: boolean) {
   g.beginPath();
   g.moveTo(W / 2, 4); g.lineTo(W / 2 + 7, 16); g.lineTo(W / 2 - 7, 16); g.closePath();
   g.fill();
+  g.font = '600 11px system-ui, sans-serif';
+  g.fillText('Puncak', W / 2 + 11, 14);
+  // The dot sits on the axis of the Vs, halfway between the bends of the second and third contour.
+  const step = (H - 60) / (levels.length - 1);
+  const y = H - 30 - 1.5 * step + (valley ? -28 : 28);
+  g.fillStyle = '#d2322d';
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.arc(W / 2, y, 6, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
 }

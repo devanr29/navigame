@@ -51,7 +51,7 @@ export const Zone = {
   Forest: 1,
 } as const;
 
-export type LandmarkKind = 'peak' | 'tower' | 'hut' | 'bridge' | 'lonetree';
+export type LandmarkKind = 'peak' | 'tower' | 'hut' | 'bridge' | 'lonetree' | 'monument';
 
 export interface Landmark {
   kind: LandmarkKind;

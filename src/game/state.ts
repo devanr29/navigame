@@ -16,6 +16,21 @@ export const TOOLS: { id: ToolId; name: string; job: string }[] = [
 
 export const ALL_TOOLS = new Set<ToolId>(TOOLS.map((t) => t.id));
 
+/**
+ * Items that sit near the kit at base camp but are not navigation tools in the material. A few are
+ * mixed into the packing screen at random; packing one is a mistake explained in the debrief.
+ */
+export const DISTRACTORS: { name: string; job: string; why: string }[] = [
+  { name: 'GPS', job: 'Menunjukkan posisi otomatis', why: 'GPS tidak dipakai: posisi harus ditemukan sendiri dengan peta dan kompas.' },
+  { name: 'Senter', job: 'Penerangan saat gelap', why: 'Senter berguna untuk berkegiatan, tetapi bukan alat navigasi darat.' },
+  { name: 'Spidol', job: 'Menebalkan garis di peta', why: 'Spidol merusak peta dan tidak bisa dihapus; menggaris memakai pensil.' },
+  { name: 'Kalkulator', job: 'Menghitung jarak dan azimut', why: 'Azimut balik dan skala dihitung sendiri; kalkulator bukan alat navigasi darat.' },
+  { name: 'Peluit', job: 'Memberi tanda darurat', why: 'Peluit adalah perlengkapan darurat, bukan alat navigasi darat.' },
+  { name: 'Teropong', job: 'Melihat objek di kejauhan', why: 'Titik ekstrem dibidik dengan kompas; teropong bukan alat navigasi darat.' },
+  { name: 'Jas hujan', job: 'Melindungi dari hujan', why: 'Jas hujan adalah perlengkapan pribadi, bukan alat navigasi darat.' },
+  { name: 'Busur 180°', job: 'Mengukur sudut setengah lingkaran', why: 'Plotting azimut memakai busur 360°, bukan busur 180°.' },
+];
+
 /** A compass reading taken in the field. */
 export interface Reading {
   /** Azimuth shown on the compass (whole degrees, magnetic). */

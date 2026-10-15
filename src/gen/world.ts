@@ -177,6 +177,11 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     }
   }
   markSolid(lone[0], lone[1]);
+
+  // Stone monument (tugu) on top of the hill between the river and the main peak.
+  const tugu = clampIn(argmaxNear(hills[hills.length - 1].c, 45), 8) as P;
+  flatten(tugu, 1);
+  markSolid(tugu[0], tugu[1]);
   syncHeight();
   onProgress('Menempatkan titik ekstrem', 1);
 
@@ -229,7 +234,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
 
   // ---------------------------------------------------------------- 7. Trees (deterministic per cell)
   onProgress('Menanam pohon', 0);
-  const landmarkPts: P[] = [peak, tower, hutC, lone, [Math.floor(bc[0]), Math.floor(bc[1])]];
+  const landmarkPts: P[] = [peak, tower, hutC, lone, tugu, [Math.floor(bc[0]), Math.floor(bc[1])]];
   const treeList: number[] = [];
   for (let z = 1; z < N - 1; z++) {
     for (let x = 1; x < N - 1; x++) {
@@ -260,6 +265,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     { kind: 'hut', name: 'Pondok', x: hutC[0], z: hutC[1], y: height[hutC[1] * N + hutC[0]] },
     { kind: 'bridge', name: 'Jembatan', x: bc[0], z: bc[1], y: bLevel + 1, dir, halfLen },
     { kind: 'lonetree', name: 'Pohon Beringin', x: lone[0] + 0.5, z: lone[1] + 0.5, y: height[lone[1] * N + lone[0]] },
+    { kind: 'monument', name: 'Tugu Batas', x: tugu[0] + 0.5, z: tugu[1] + 0.5, y: height[tugu[1] * N + tugu[0]] },
   ];
 
   const spawnPoly = trails[0];

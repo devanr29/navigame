@@ -70,6 +70,20 @@ const [ax, ay] = await toScreen(100, 100), [bx, by] = await toScreen(500, 100);
 await page.mouse.move(ax, ay); await page.mouse.down(); await page.mouse.move(bx, by, { steps: 8 }); await page.mouse.up();
 const ro = await page.locator('.map-readout').textContent();
 check('ruler: 400 blocks = 1 km = 4 cm at 1:25.000', /4,0\d cm|3,9\d cm/.test(ro), ro);
+// phone way: pan so the point is under the centre crosshair, then press Titik awal / Titik akhir
+const centreOn = (x, z) => g(([x, z]) => { const m = window.__game.map; m.cx = x; m.cz = z; m.redraw(); }, [x, z]);
+check('Titik akhir disabled before a start', await page.getByRole('button', { name: 'Titik akhir' }).isDisabled());
+await centreOn(150, 300);
+await page.getByRole('button', { name: 'Titik awal' }).click();
+await centreOn(350, 300);
+await page.waitForFunction(() => !/ 0,00 cm/.test(document.querySelector('.map-readout').textContent), null, { timeout: 8000 }).catch(() => {});
+check('ruler end follows the crosshair', /2,0\d cm|1,9\d cm/.test(await page.locator('.map-readout').textContent()), await page.locator('.map-readout').textContent());
+await page.getByRole('button', { name: 'Titik akhir' }).click();
+await centreOn(600, 600);
+await page.waitForTimeout(100);
+const ro2 = await page.locator('.map-readout').textContent();
+check('ruler buttons: 200 blocks = 2 cm, end stays after Titik akhir', /2,0\d cm|1,9\d cm/.test(ro2), ro2);
+check('map notes list the paired reading with its back azimuth', /balik/.test(await page.locator('.map-notes').textContent()), await page.locator('.map-notes').textContent());
 
 await tool('Pensil');
 await page.mouse.move(ax, ay + 40); await page.mouse.down(); await page.mouse.move(bx, by + 40, { steps: 10 }); await page.mouse.up();

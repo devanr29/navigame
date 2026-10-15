@@ -28,7 +28,7 @@ describe('world generation', () => {
     const w = seed === 'jamadagni' ? a : generateWorld(seed);
     const N = w.size;
     const kinds = w.landmarks.map((l) => l.kind).sort();
-    expect(kinds).toEqual(['bridge', 'hut', 'lonetree', 'peak', 'tower']);
+    expect(kinds).toEqual(['bridge', 'hut', 'lonetree', 'monument', 'peak', 'tower']);
     for (const l of w.landmarks) {
       expect(l.x).toBeGreaterThan(0);
       expect(l.x).toBeLessThan(N);

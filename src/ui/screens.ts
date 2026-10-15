@@ -2,10 +2,13 @@
 // and a small number dialog. All built with DOM methods (no innerHTML).
 import type { LevelInfo, Result } from '../game/missions';
 import type { Question } from '../game/quiz';
-import { TOOLS, type Progress, type ToolId } from '../game/state';
+import { DISTRACTORS, TOOLS, type Progress, type ToolId } from '../game/state';
 import type { CharacterPreview } from './preview';
 
 type Kids = (Node | string | null | false | undefined)[];
+
+/** What went into the zipper bag: the navigation tools, and any non-navigation items packed by mistake. */
+export interface Packed { tools: Set<ToolId>; extras: typeof DISTRACTORS }
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', ...kids: Kids): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -75,26 +78,40 @@ export class Screens {
     });
   }
 
-  /** Packing screen. In early levels each item is tapped into the pouch; later a quick "pack all" is offered. */
-  packing(level: LevelInfo, quick: boolean): Promise<Set<ToolId>> {
+  /**
+   * Packing screen. Each item is tapped into the zipper bag; a few items that are not navigation tools
+   * are mixed in. Later levels offer a quick "pack all" (navigation tools only).
+   */
+  packing(level: LevelInfo, quick: boolean, rnd: () => number): Promise<Packed> {
     return new Promise((resolve) => {
       const packed = new Set<ToolId>();
+      const extras = new Set<string>();
+      const decoys = DISTRACTORS.map((d) => ({ d, r: rnd() })).sort((a, b) => a.r - b.r).slice(0, 4).map((x) => x.d);
+      // Real tools and decoys in one shuffled list, so position gives nothing away.
+      const items = [
+        ...TOOLS.map((t) => ({ key: t.id as string, name: t.name, job: t.job, tool: t.id as ToolId | null })),
+        ...decoys.map((d) => ({ key: `x:${d.name}`, name: d.name, job: d.job, tool: null })),
+      ].map((it) => ({ it, r: rnd() })).sort((a, b) => a.r - b.r).map((x) => x.it);
+      const has = (k: string, tool: ToolId | null) => (tool ? packed.has(tool) : extras.has(k));
       const pouch = el('div', 'pouch');
       const table = el('div', 'pack-items');
       const render = () => {
         table.replaceChildren();
-        pouch.replaceChildren(el('div', 'pouch-title', `Tas (pouch) · ${packed.size}/${TOOLS.length}`));
-        for (const t of TOOLS) {
-          const item = el('button', `pack-item${packed.has(t.id) ? ' in' : ''}`, el('b', '', t.name), el('span', '', t.job));
+        pouch.replaceChildren(el('div', 'pouch-title', `Zipper · ${packed.size + extras.size} barang`));
+        for (const t of items) {
+          const inBag = has(t.key, t.tool);
+          const item = el('button', `pack-item${inBag ? ' in' : ''}`, el('b', '', t.name), el('span', '', t.job));
           item.addEventListener('click', () => {
-            if (packed.has(t.id)) packed.delete(t.id);
-            else packed.add(t.id);
+            if (t.tool) { if (packed.has(t.tool)) packed.delete(t.tool); else packed.add(t.tool); }
+            else if (extras.has(t.key)) extras.delete(t.key);
+            else extras.add(t.key);
+            go.dataset.warned = '';
+            warn.textContent = '';
             render();
           });
-          (packed.has(t.id) ? pouch : table).append(item);
+          (inBag ? pouch : table).append(item);
         }
       };
-      render();
       const go = btn('Berangkat', 'btn big', () => {
         const missing = TOOLS.filter((t) => !packed.has(t.id));
         if (missing.length && !go.dataset.warned) {
@@ -102,16 +119,17 @@ export class Screens {
           warn.textContent = `Belum dikemas: ${missing.map((t) => t.name).join(', ')}. Boleh berangkat, tetapi alat itu tidak bisa dipakai di lapangan. Tekan Berangkat lagi untuk lanjut.`;
           return;
         }
-        resolve(packed);
+        resolve({ tools: packed, extras: DISTRACTORS.filter((d) => extras.has(`x:${d.name}`)) });
       });
       const warn = el('p', 'warn', '');
+      render();
       this.show(el('div', 'screen-wrap',
         el('h2', '', `Level ${level.n} · Kemas alat`),
-        el('p', 'muted', 'Ketuk alat untuk memasukkannya ke tas. Alat yang tertinggal tidak bisa dipakai di lapangan.'),
+        el('p', 'muted', 'Ketuk alat navigasi darat untuk memasukkannya ke zipper. Tidak semua barang di meja adalah alat navigasi. Alat yang tertinggal tidak bisa dipakai di lapangan.'),
         el('div', 'pack-wrap', table, pouch),
         warn,
         el('div', 'row',
-          quick ? btn('Kemas semua', 'btn ghost', () => { for (const t of TOOLS) packed.add(t.id); render(); }) : null,
+          quick ? btn('Kemas alat navigasi', 'btn ghost', () => { for (const t of TOOLS) packed.add(t.id); extras.clear(); render(); }) : null,
           go),
       ));
     });

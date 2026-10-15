@@ -139,6 +139,16 @@ const levels = {
   },
 
   async 3(page) {
+    // step 1: orient the map (required)
+    await page.evaluate(() => {
+      const g = T.g;
+      const facing = ((-g.player.yaw * 180 / Math.PI) % 360 + 360) % 360;
+      g.openMap(true);
+      g.map.rot = (-facing * Math.PI) / 180;
+      g.map.redraw();
+    });
+    await page.waitForTimeout(400);
+    await page.evaluate(() => T.g.openMap(false));
     const vis = await page.evaluate(() => T.visibleLandmarks());
     const lines = [];
     for (const id of vis.slice(0, 2)) {
@@ -344,6 +354,7 @@ async function cutTo(page, az, steps, obstacle) {
   let detour = 'none';
   let blockedSeen = false;
   const log = [];
+  let minD = Infinity;
   while (Date.now() - t0 < 300000) {
     const st = await page.evaluate(() => {
       const g = T.g, tm = g.team;
@@ -378,7 +389,10 @@ async function cutTo(page, az, steps, obstacle) {
       await page.evaluate(() => { const tm = T.g.team; tm.turn90(1); tm.locked = (tm.locked + 90) % 360; });
       detour = 'done';
     }
-    if (st.d < 6 && st.cutting) {
+    // End the leg at the post, or once it is clearly past it (the distance grows again near the
+    // post): then search around the end point, as the GDD's end-of-leg search.
+    minD = Math.min(minD, st.d);
+    if (st.cutting && (st.d < 6 || (minD < 20 && st.d > minD + 2))) {
       await page.evaluate(() => { T.g.input.forceForward = false; });
       await clickAction(page, 'Selesai leg');
       // walk the last few blocks to the post

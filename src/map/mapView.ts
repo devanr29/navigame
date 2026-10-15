@@ -75,9 +75,15 @@ export class MapView {
   lines: MapLine[] = [];
   marks: MapMark[] = [];
   private ruler: { ax: number; az: number; bx: number; bz: number } | null = null;
+  /** True after "Titik awal" until "Titik akhir": the ruler's end follows the centre crosshair. */
+  private rulerLive = false;
+  /** Which ruler end a finger is dragging. */
+  private rulerEnd: 'a' | 'b' = 'b';
   private protractor: { x: number; z: number; az: number } | null = null;
   private drawing: MapStroke | null = null;
-  private gesture: 'none' | 'tool' | 'pinch' | 'pan' | 'busur-move' = 'none';
+  private gesture: 'none' | 'tool' | 'pinch' | 'pan' | 'busur-move' | 'ruler-end' | 'mark-move' = 'none';
+  /** Finger position (canvas px) while a precise placement is under way; the loupe magnifies it. */
+  private loupe: { x: number; y: number } | null = null;
 
   // tools and mission hooks
   private tool: MapTool = 'geser';
@@ -100,7 +106,14 @@ export class MapView {
   private bannerOk: HTMLButtonElement;
   private orientEl: HTMLElement;
   private lockBtn: HTMLButtonElement;
+  private rulerBar: HTMLElement;
+  private rulerEndBtn: HTMLButtonElement;
+  private notesEl: HTMLElement;
+  private notesOpen = true;
+  private notes: string[] = [];
   private toolBtns = new Map<MapTool, HTMLButtonElement>();
+  /** Compass reading shown on the map while in the field (null: no compass or not in the field). */
+  heading: number | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private w: WorldData, root: HTMLElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -164,7 +177,25 @@ export class MapView {
     this.orientEl = div('map-orient');
     this.orientEl.hidden = true;
 
-    root.append(this.toolbar, this.readout, this.protBar, this.banner, this.orientEl);
+    // Ruler on a phone: pan the map so a point sits under the centre crosshair, then press a button.
+    // A fingertip is too wide to drop the ends exactly by dragging.
+    this.rulerBar = div('prot-bar');
+    this.rulerBar.hidden = true;
+    const startBtn = button('Titik awal', 'btn small');
+    startBtn.addEventListener('click', () => this.setRulerStart());
+    this.rulerEndBtn = button('Titik akhir', 'btn small');
+    this.rulerEndBtn.addEventListener('click', () => this.setRulerEnd());
+    this.rulerBar.append(startBtn, this.rulerEndBtn);
+
+    // Field notebook entries that are ready to draw (paired, back azimuth written).
+    this.notesEl = div('map-notes');
+    this.notesEl.hidden = true;
+    this.notesEl.addEventListener('click', () => {
+      this.notesOpen = !this.notesOpen;
+      this.renderNotes();
+    });
+
+    root.append(this.toolbar, this.readout, this.protBar, this.rulerBar, this.banner, this.orientEl, this.notesEl);
 
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -206,6 +237,7 @@ export class MapView {
     this.pointers.clear();
     this.gesture = 'none';
     this.drawing = null;
+    this.loupe = null;
   }
 
   isOpen() { return this.open; }
@@ -262,6 +294,9 @@ export class MapView {
     this.reveals = [];
     this.request = null;
     this.banner.hidden = true;
+    this.rulerLive = false;
+    this.notes = [];
+    this.renderNotes();
     this.rot = 0;
     this.placed = false;
     this.lockRot = false;
@@ -289,6 +324,59 @@ export class MapView {
     this.updateOrient();
   }
 
+  /** Lines shown in the notes panel on the map (empty hides it). */
+  setNotes(lines: string[]) {
+    this.notes = lines;
+    this.renderNotes();
+  }
+
+  private renderNotes() {
+    this.notesEl.hidden = this.notes.length === 0;
+    this.notesEl.replaceChildren(div('map-notes-head'));
+    this.notesEl.firstElementChild!.textContent = `Catatan ${this.notesOpen ? '▾' : '▸'}`;
+    if (!this.notesOpen) return;
+    for (const n of this.notes) {
+      const row = div('');
+      row.textContent = n;
+      this.notesEl.append(row);
+    }
+  }
+
+  /** Sheet point under the centre crosshair, snapped to a nearby symbol or mark. */
+  private centrePoint(): [number, number] {
+    return this.snap(this.cx, this.cz);
+  }
+
+  private setRulerStart() {
+    const [x, z] = this.centrePoint();
+    this.ruler = { ax: x, az: z, bx: x, bz: z };
+    this.rulerLive = true;
+    this.updateReadout();
+    this.syncChrome();
+    this.dirty = true;
+  }
+
+  private setRulerEnd() {
+    if (!this.ruler) return;
+    const [x, z] = this.centrePoint();
+    this.ruler.bx = x;
+    this.ruler.bz = z;
+    this.rulerLive = false;
+    this.updateReadout();
+    this.syncChrome();
+    this.dirty = true;
+  }
+
+  /** Shows only the controls that make sense right now. A pending request hides the tools. */
+  private syncChrome() {
+    const req = this.request !== null;
+    this.toolbar.hidden = req;
+    this.protBar.hidden = req || this.tool !== 'busur';
+    this.rulerBar.hidden = req || this.tool !== 'penggaris';
+    this.rulerEndBtn.disabled = !this.ruler || !this.rulerLive;
+    this.readout.hidden = req || !(this.tool === 'busur' || this.tool === 'penggaris');
+  }
+
   private writeTool(): 'pensil' | 'pena' | null {
     return this.tools.has('pensil') ? 'pensil' : this.tools.has('pena') ? 'pena' : null;
   }
@@ -296,8 +384,7 @@ export class MapView {
   private setTool(t: MapTool) {
     this.tool = t;
     for (const [k, b] of this.toolBtns) b.classList.toggle('on', k === t);
-    this.protBar.hidden = t !== 'busur';
-    this.readout.hidden = !(t === 'busur' || t === 'penggaris');
+    this.syncChrome();
     this.updateReadout();
     this.dirty = true;
   }
@@ -307,15 +394,21 @@ export class MapView {
     this.bannerOk.hidden = !needsOk;
     this.bannerOk.disabled = needsOk;
     this.banner.hidden = false;
+    this.syncChrome();
+    this.dirty = true;
+  }
+
+  private endRequest() {
+    this.request = null;
+    this.banner.hidden = true;
+    this.syncChrome();
     this.dirty = true;
   }
 
   private confirmRequest() {
     const r = this.request;
     if (!r || r.kind !== 'mark' || !r.at) return;
-    this.request = null;
-    this.banner.hidden = true;
-    this.dirty = true;
+    this.endRequest();
     r.done(r.at[0], r.at[1]);
   }
 
@@ -324,29 +417,31 @@ export class MapView {
 
   cancelRequest() {
     if (!this.request) return;
-    this.request = null;
-    this.banner.hidden = true;
-    this.dirty = true;
+    this.endRequest();
     this.onRequestCancel();
   }
 
   private updateOrient() {
+    const head = this.heading === null ? null : `Kompas ${String(Math.round(this.heading) % 360).padStart(3, '0')}°`;
     if (this.orientFacing === null) {
-      this.orientEl.hidden = true;
+      this.orientEl.hidden = head === null;
+      this.orientEl.textContent = head ?? '';
+      this.orientEl.classList.remove('ok');
       return;
     }
     const err = this.orientationError(this.orientFacing);
     this.orientEl.hidden = false;
     const ok = Math.abs(err) <= 5;
-    this.orientEl.textContent = ok
+    const state = ok
       ? `Peta sudah diutarakan (selisih ${Math.abs(Math.round(err))}°)`
       : `Peta melenceng ${Math.abs(Math.round(err))}° — putar peta dengan dua jari`;
+    this.orientEl.textContent = head ? `${head} · ${state}` : state;
     this.orientEl.classList.toggle('ok', ok);
   }
 
   private updateReadout() {
     if (this.tool === 'penggaris') {
-      if (!this.ruler) this.readout.textContent = 'Seret di peta untuk mengukur';
+      if (!this.ruler) this.readout.textContent = 'Geser peta: taruh titik di tanda + lalu tekan Titik awal';
       else {
         const blocks = Math.hypot(this.ruler.bx - this.ruler.ax, this.ruler.bz - this.ruler.az);
         this.readout.textContent = `Penggaris: ${fmtCm(blocks)} cm`;
@@ -470,6 +565,10 @@ export class MapView {
 
   private draw() {
     this.dirty = false;
+    if (this.rulerLive && this.ruler && this.tool === 'penggaris') {
+      [this.ruler.bx, this.ruler.bz] = this.centrePoint();
+      this.updateReadout();
+    }
     const ctx = this.ctx;
     const W = this.canvas.width / this.dpr;
     const H = this.canvas.height / this.dpr;
@@ -552,7 +651,52 @@ export class MapView {
     this.drawReveals(m);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (this.tool === 'penggaris' && !this.request) this.drawCrosshair(W / 2, H / 2);
+    if (this.loupe) this.drawLoupe(this.loupe.x, this.loupe.y, W);
     if (this.showLegend) this.drawLegend(W, H);
+  }
+
+  /** Fixed crosshair at the screen centre: the ruler buttons drop an end here. */
+  private drawCrosshair(x: number, y: number) {
+    const ctx = this.ctx;
+    for (const [col, w] of [['#ffffff', 4], [C.tool, 2]] as [string, number][]) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(x - 16, y); ctx.lineTo(x - 5, y);
+      ctx.moveTo(x + 5, y); ctx.lineTo(x + 16, y);
+      ctx.moveTo(x, y - 16); ctx.lineTo(x, y - 5);
+      ctx.moveTo(x, y + 5); ctx.lineTo(x, y + 16);
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * Magnifier above the fingertip (canvas px), so the player sees exactly what is under the finger.
+   * It copies the just-drawn frame from this same canvas, which costs one image draw.
+   */
+  private drawLoupe(fx: number, fy: number, W: number) {
+    const ctx = this.ctx;
+    const R = 58, MAG = 2.4, GAP = 104;
+    let lx = fx, ly = fy - GAP;
+    if (ly - R < 4) { ly = fy; lx = fx + (fx < W / 2 ? GAP : -GAP); }
+    const src = (2 * R) / MAG;
+    const d = this.dpr;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(lx, ly, R, 0, Math.PI * 2);
+    ctx.fillStyle = C.desk;
+    ctx.fill();
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.canvas, (fx - src / 2) * d, (fy - src / 2) * d, src * d, src * d, lx - R, ly - R, 2 * R, 2 * R);
+    ctx.restore();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(lx, ly, R, 0, Math.PI * 2);
+    ctx.stroke();
+    this.drawCrosshair(lx, ly);
   }
 
   private drawUserLayer(m: number) {
@@ -851,6 +995,7 @@ export class MapView {
       ['Pondok', (c) => drawSymbol(c, 'hut')],
       ['Jembatan', (c) => { c.beginPath(); c.moveTo(-9, -6); c.lineTo(-6, -3); c.lineTo(6, -3); c.lineTo(9, -6); c.moveTo(-9, 6); c.lineTo(-6, 3); c.lineTo(6, 3); c.lineTo(9, 6); c.stroke(); }],
       ['Pohon tunggal', (c) => drawSymbol(c, 'lonetree')],
+      ['Tugu', (c) => drawSymbol(c, 'monument')],
       ['Pos / patok (koordinat diketahui)', (c) => { c.fillStyle = '#fff'; c.beginPath(); c.arc(0, 0, 4.5, 0, Math.PI * 2); c.fill(); c.stroke(); }],
       ['Jalan setapak', (c) => { c.setLineDash([5, 3]); c.strokeStyle = C.trail; c.beginPath(); c.moveTo(-10, 0); c.lineTo(10, 0); c.stroke(); c.setLineDash([]); }],
       ['Sungai', (c) => { c.strokeStyle = C.river; c.lineWidth = 3; c.beginPath(); c.moveTo(-10, 2); c.quadraticCurveTo(0, -4, 10, 2); c.stroke(); }],
@@ -963,6 +1108,21 @@ export class MapView {
     return best;
   }
 
+  private setLoupe(e: PointerEvent | null) {
+    if (!e) { this.loupe = null; return; }
+    const r = this.canvas.getBoundingClientRect();
+    this.loupe = { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** Which ruler end lies under the finger (within 28 screen px), if any. */
+  private rulerEndAt(x: number, z: number): 'a' | 'b' | null {
+    const r = this.ruler;
+    if (!r) return null;
+    const da = Math.hypot(r.ax - x, r.az - z) * this.zoom, db = Math.hypot(r.bx - x, r.bz - z) * this.zoom;
+    if (Math.min(da, db) > 28) return null;
+    return db <= da ? 'b' : 'a';
+  }
+
   private onDown = (e: PointerEvent) => {
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
@@ -971,23 +1131,46 @@ export class MapView {
       if (this.drawing && this.drawing.pts.length < 6) this.strokes.pop();
       this.drawing = null;
       this.gesture = 'pinch';
+      this.loupe = null;
       return;
     }
     if (e.pointerType === 'mouse' && e.button === 2) { this.gesture = 'pan'; return; }
     const [x, z] = this.screenToSheet(e.clientX, e.clientY);
-    if (this.request) { this.gesture = 'tool'; return; }
+    if (this.request) {
+      // A placed mark can be dragged into place; elsewhere a tap places it and a drag pans.
+      const at = this.request.kind === 'mark' ? this.request.at : null;
+      this.gesture = at && Math.hypot(at[0] - x, at[1] - z) * this.zoom < 30 ? 'mark-move' : 'tool';
+      if (this.request.kind === 'mark') this.setLoupe(e);
+      this.dirty = true;
+      return;
+    }
     this.gesture = this.tool === 'geser' ? 'pan' : 'tool';
-    if (this.tool === 'pensil') {
+    if (this.tool === 'penggaris') {
+      // Touch: drag an end of the ruler, or pan (the ends are set with the buttons). Mouse: drag to measure.
+      const end = this.rulerEndAt(x, z);
+      if (end) {
+        this.gesture = 'ruler-end';
+        this.rulerEnd = end;
+        if (end === 'b') this.rulerLive = false;
+        this.setLoupe(e);
+      } else if (e.pointerType === 'mouse') {
+        const [sx, sz] = this.snap(x, z);
+        this.ruler = { ax: sx, az: sz, bx: sx, bz: sz };
+        this.rulerEnd = 'b';
+        this.rulerLive = false;
+        this.gesture = 'ruler-end';
+      } else this.gesture = 'pan';
+      this.updateReadout();
+      this.syncChrome();
+    } else if (this.tool === 'titik') {
+      this.setLoupe(e);
+    } else if (this.tool === 'pensil') {
       const wt = this.writeTool();
       if (!wt) return;
       this.drawing = { pts: [x, z], pen: wt === 'pena' };
       this.strokes.push(this.drawing);
     } else if (this.tool === 'hapus') {
       this.eraseAt(x, z);
-    } else if (this.tool === 'penggaris') {
-      const [sx, sz] = this.snap(x, z);
-      this.ruler = { ax: sx, az: sz, bx: sx, bz: sz };
-      this.updateReadout();
     } else if (this.tool === 'busur') {
       const p = this.protractor;
       if (p && Math.hypot(p.x - x, p.z - z) * this.zoom < 26) this.gesture = 'busur-move';
@@ -997,6 +1180,7 @@ export class MapView {
         this.protInput.value = '0';
         this.gesture = 'busur-move';
       } else this.aimProtractor(x, z);
+      if (this.gesture === 'busur-move') this.setLoupe(e);
       this.updateReadout();
     }
     this.dirty = true;
@@ -1034,22 +1218,31 @@ export class MapView {
         const [ax, az] = this.screenToSheet(p.x, p.y);
         this.pin(ax, az, e.clientX, e.clientY);
       }
+    } else if (this.gesture === 'mark-move' && this.request?.kind === 'mark') {
+      this.request.at = this.screenToSheet(e.clientX, e.clientY);
+      this.setLoupe(e);
+      this.dirty = true;
+    } else if (this.gesture === 'ruler-end' && this.ruler) {
+      const [sx, sz] = this.snap(...this.screenToSheet(e.clientX, e.clientY));
+      if (this.rulerEnd === 'a') { this.ruler.ax = sx; this.ruler.az = sz; } else { this.ruler.bx = sx; this.ruler.bz = sz; }
+      if (this.loupe) this.setLoupe(e);
+      this.updateReadout();
+      this.dirty = true;
     } else if (this.gesture === 'tool' || this.gesture === 'busur-move') {
       const [x, z] = this.screenToSheet(e.clientX, e.clientY);
       if (this.request) {
         // While placing a requested mark, a one-finger drag pans; only a tap places the mark.
-        if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 10) this.gesture = 'pan';
+        if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 10) { this.gesture = 'pan'; this.loupe = null; }
+        else this.setLoupe(e);
+      } else if (this.tool === 'titik') {
+        this.setLoupe(e);
       } else if (this.tool === 'pensil' && this.drawing) {
         const pts = this.drawing.pts;
         if (Math.hypot(pts[pts.length - 2] - x, pts[pts.length - 1] - z) * this.zoom > 2) pts.push(x, z);
       } else if (this.tool === 'hapus') {
         this.eraseAt(x, z);
-      } else if (this.tool === 'penggaris' && this.ruler) {
-        const [sx, sz] = this.snap(x, z);
-        this.ruler.bx = sx;
-        this.ruler.bz = sz;
-        this.updateReadout();
       } else if (this.tool === 'busur' && this.protractor) {
+        if (this.gesture === 'busur-move') this.setLoupe(e);
         if (this.gesture === 'busur-move') {
           const [sx, sz] = this.snap(x, z);
           this.protractor.x = sx;
@@ -1068,6 +1261,7 @@ export class MapView {
     this.pointers.delete(e.pointerId);
     if (!p) return;
     const tap = Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 10;
+    if (this.gesture === 'mark-move' && this.request?.kind === 'mark') this.bannerOk.disabled = false;
     if (this.gesture === 'tool' && this.pointers.size === 0) {
       const [x, z] = this.screenToSheet(e.clientX, e.clientY);
       if (this.request?.kind === 'mark' && tap) {
@@ -1077,11 +1271,11 @@ export class MapView {
         const id = this.pickSymbol(x, z);
         if (id >= 0) {
           const r = this.request;
-          this.request = null;
-          this.banner.hidden = true;
+          this.endRequest();
           r.done(id);
         }
-      } else if (this.tool === 'titik' && tap) {
+      } else if (this.tool === 'titik' && !this.request) {
+        // Press, slide while watching the loupe, release to place.
         const wt = this.writeTool();
         if (wt) this.marks.push({ x, z, label: String(this.marks.length + 1), pen: wt === 'pena' });
       } else if (this.tool === 'pensil' && this.drawing && this.drawing.pts.length < 4) {
@@ -1091,6 +1285,8 @@ export class MapView {
     if (this.pointers.size === 0) {
       this.gesture = 'none';
       this.drawing = null;
+      this.loupe = null;
+      this.syncChrome();
     }
     this.dirty = true;
   };
@@ -1186,6 +1382,12 @@ export function drawSymbol(ctx: CanvasRenderingContext2D, kind: Landmark['kind']
       ctx.fillStyle = '#4c8a3e';
       ctx.fill();
       ctx.stroke();
+      break;
+    case 'monument':
+      ctx.beginPath();
+      ctx.moveTo(-1.8, 4); ctx.lineTo(-1.1, -5); ctx.lineTo(0, -7.5); ctx.lineTo(1.1, -5); ctx.lineTo(1.8, 4); ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(-4, 4, 8, 2);
       break;
     case 'bridge':
       break;
