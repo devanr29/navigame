@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#1f2a22" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>Navigasi Darat</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cpolygon points=%2216,2 30,12 25,29 7,29 2,12%22 fill=%22%23ef8a1c%22/%3E%3Cpolygon points=%2216,9 23,22 9,22%22 fill=%22%232f8fd8%22/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="touch"></div>
+    <div id="joy"><div id="knob"></div></div>
+
+    <div id="hud" hidden>
+      <div id="fps"></div>
+      <div id="objectives"></div>
+      <div id="pace" hidden></div>
+      <div id="gauge" hidden></div>
+      <button id="btn-compass" class="btn round">Kompas</button>
+      <div class="hud-right">
+        <button id="btn-menu" class="btn ghost" aria-label="Keluar misi">✕</button>
+        <button id="btn-full" class="btn ghost" aria-label="Layar penuh">⛶</button>
+        <button id="btn-notebook" class="btn ghost">Catatan</button>
+        <button id="btn-map" class="btn">Peta</button>
+      </div>
+      <div id="actions"></div>
+      <button id="btn-jump" class="btn round">Lompat</button>
+    </div>
+
+    <div id="notebook" hidden>
+      <div class="nb-head"><b>Catatan lapangan</b><button id="notebook-close" class="btn ghost small">Tutup</button></div>
+      <div id="notebook-body"></div>
+    </div>
+
+    <div id="sight" hidden>
+      <div class="vignette"></div>
+      <div class="crosshair"></div>
+      <canvas id="compass-tape"></canvas>
+    </div>
+    <div id="toast" hidden></div>
+
+    <div id="map-screen" hidden>
+      <canvas id="map"></canvas>
+      <div class="map-bar">
+        <button id="map-close" class="btn">Tutup</button>
+        <button id="map-north" class="btn ghost">Utara ↑</button>
+        <button id="map-legend" class="btn ghost">Legenda</button>
+      </div>
+    </div>
+
+    <div id="screen" hidden></div>
+    <div id="dialog" hidden></div>
+    <div id="loading-mini" hidden>Menyiapkan medan…</div>
+
+    <div id="loading">
+      <img id="logo" alt="Logo PPA Jamadagni" />
+      <h1>Navigasi Darat</h1>
+      <p class="sub">Latihan peta dan kompas · PPA Jamadagni</p>
+      <div class="bar"><div id="bar-fill"></div></div>
+      <p id="stage">Menyiapkan…</p>
+      <button id="btn-start" class="btn big" hidden>Mulai</button>
+      <p class="seed" id="seed"></p>
+    </div>
+
+    <div id="rotate">
+      <div class="phone"></div>
+      <p>Putar ponsel ke posisi lanskap</p>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
