@@ -139,6 +139,36 @@ export abstract class Mission {
   devInfo(): [string, string][] { return []; }
   /** Developer mode only: named points of this mission to teleport to. */
   devPoints(): { label: string; p: P }[] { return []; }
+  /**
+   * Developer mode only: the steps that solve this mission, filled in with this world's answers
+   * (azimuths, coordinates, distances). Shown collapsed in the panel.
+   */
+  devSolution(): string[] { return []; }
+
+  /** Solution steps for a resection standing at p: the visible titik ekstrem pair crossing nearest 90°, then a third to check. */
+  protected resectionKey(p: P): string[] {
+    const { w, sight } = this.c;
+    const N = w.size;
+    const eye = w.height[Math.floor(p[1]) * N + Math.floor(p[0])] + 1.7 / BLOCK_M;
+    const ids = sight.visibleLandmarks(p[0], eye, p[1], 420);
+    const az = (id: number) => magneticOf(azimuthTo(p[0], p[1], w.landmarks[id].x, w.landmarks[id].z));
+    const quality = (a: number, b: number) => 90 - Math.abs(90 - Math.abs(angleDiff(az(a), az(b))));
+    let pair: [number, number] | null = null;
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      if (!pair || quality(ids[i], ids[j]) > quality(...pair)) pair = [ids[i], ids[j]];
+    }
+    if (!pair) return [`Kurang dari dua titik ekstrem terlihat dari ${fmtCoord(p)}. Pindah sedikit ke tempat yang lebih terbuka.`];
+    const step = (id: number) => {
+      const a = Math.round(az(id)) % 360;
+      return `Bidik ${w.landmarks[id].name}: azimut ${deg(a)}. Di Catatan pasangkan dengan simbol ${w.landmarks[id].name}, back azimuth ${deg(backAzimuth(a))}. Di peta letakkan busur di simbol itu dan gariskan ${deg(backAzimuth(a))}.`;
+    };
+    const third = ids.find((id) => !pair.includes(id));
+    return [
+      ...pair.map(step),
+      ...(third === undefined ? [] : [`Opsional, cek dengan titik ketiga: ${step(third)}`]),
+      `Garis-garis berpotongan di ${fmtCoord(p)} (selisih arah ${Math.round(quality(...pair))}°).`,
+    ];
+  }
 
   /** Removes the mission's objects from the world. */
   cleanup() {
@@ -298,6 +328,17 @@ class Orientation extends Mission {
   }
 
   devPoints() { return [{ label: 'Titik awal', p: this.c.sites.orient }]; }
+
+  devSolution() {
+    const p = this.c.sites.orient, { w, sight } = this.c;
+    const eye = w.height[Math.floor(p[1]) * w.size + Math.floor(p[0])] + 1.7 / BLOCK_M;
+    const ids = sight.visibleLandmarks(p[0], eye, p[1], 420).slice(0, 3);
+    return [
+      'Tekan Kompas dan bidik ke arah mana saja sekali.',
+      'Buka Peta dan putar dengan dua jari sampai utara peta searah utara kompas. "Peta terutarakan sekarang" di info misi harus ≤5°.',
+      ...ids.map((id) => `Bidik ${w.landmarks[id].name} (azimut ${deg(magneticOf(azimuthTo(p[0], p[1], w.landmarks[id].x, w.landmarks[id].z)))}), lalu di Catatan pasangkan dengan simbol ${w.landmarks[id].name}.`),
+    ];
+  }
 }
 
 // ======================================================================= level 3: resection
@@ -449,6 +490,15 @@ class Resection extends Mission {
   }
 
   devPoints() { return [{ label: 'Titik resection', p: this.c.sites.resection }]; }
+
+  devSolution() {
+    const p = this.c.sites.resection;
+    return [
+      'Utarakan peta (selisih ≤5°).',
+      ...this.resectionKey(p),
+      `Tekan Tandai posisiku dan ketuk titik potong di ${fmtCoord(p)}. Lulus bila galat ≤100 m.`,
+    ];
+  }
 }
 
 // ======================================================================= level 4: intersection
@@ -546,6 +596,18 @@ class Intersection extends Mission {
   }
 
   devPoints() { return [{ label: 'Pos A', p: this.A }, { label: 'Pos B', p: this.B }, { label: 'Asap', p: this.smoke }]; }
+
+  devSolution() {
+    const s = this.smoke, A = this.A, B = this.B;
+    const az = (p: P, q: P) => deg(magneticOf(azimuthTo(p[0], p[1], q[0], q[1])));
+    return [
+      `Di Pos A (≤20 m dari bendera oranye), bidik asap: azimut ${az(A, s)}.`,
+      `Di peta letakkan busur di simbol Pos A dan gariskan ${az(A, s)} (azimut, bukan back azimuth).`,
+      `Berjalan ke Pos B (bendera ungu): azimut ${az(A, B)}, ${M(dist(A, B))} m dari Pos A.`,
+      `Di Pos B bidik asap: azimut ${az(B, s)}. Gariskan ${az(B, s)} dari simbol Pos B.`,
+      `Tekan Laporkan letak asap dan ketuk titik potong di ${fmtCoord(s)}. Lulus bila galat ≤150 m.`,
+    ];
+  }
 }
 
 // ======================================================================= level 5: navter route
@@ -688,6 +750,20 @@ class Route extends Mission {
     const r = this.c.sites.route;
     return [{ label: 'Titik awal', p: r.start }, ...r.crossroads.map((p, k) => ({ label: `Persimpangan ${k + 1}`, p })), { label: 'Pos tujuan', p: r.dest }];
   }
+
+  devSolution() {
+    const r = this.c.sites.route, js = r.crossroads;
+    const leg = (a: P, b: P) => `garis lurus ${M(dist(a, b))} m, azimut ${deg(magneticOf(azimuthTo(a[0], a[1], b[0], b[1])))}`;
+    const last = js[js.length - 1], d = M(dist(last, r.dest));
+    return [
+      'Utarakan peta (selisih ≤5°).',
+      ...this.resectionKey(r.start),
+      `Tekan Tandai posisiku dan ketuk ${fmtCoord(r.start)}.`,
+      ...js.map((j, k) => `Ikuti jalan ke persimpangan ${k + 1} (${leg(k ? js[k - 1] : r.start, j)}). Tekan Cek persimpangan dan ketuk persimpangan itu di peta, ${fmtCoord(j)} (benar bila ≤${M(Route.JUNCTION_OK)} m).`),
+      `Dari persimpangan ${js.length}, ikuti jalan ke pos bendera oranye (${leg(last, r.dest)}; di jalan sedikit lebih jauh, sekitar ${Math.round((d * DEFAULT_PACE) / 100)}+ langkah).`,
+      `Di pos (≤20 m) tekan Lapor tiba.`,
+    ];
+  }
 }
 
 // ======================================================================= level 6: declination
@@ -783,6 +859,17 @@ class Declination extends Mission {
   }
 
   devPoints() { return [{ label: 'Patok awal', p: this.startP }, { label: 'Patok sasaran', p: this.target }]; }
+
+  devSolution() {
+    const gridAz = azimuthTo(this.startP[0], this.startP[1], this.target[0], this.target[1]);
+    const d = M(dist(this.startP, this.target));
+    return [
+      `Di peta letakkan busur di patok awal dan arahkan ke patok sasaran: azimut peta ${deg(gridAz)} (opsional: Gariskan).`,
+      `Koreksi deklinasi: ${deg(gridAz)} − 6° = ${deg(magneticOf(gridAz))}. Tekan Kunci kompas dan isi ${Math.round(magneticOf(gridAz))}.`,
+      `Hadap ${deg(magneticOf(gridAz))} di kompas dan berjalan lurus ${d} m (sekitar ${Math.round((d * DEFAULT_PACE) / 100)} langkah di medan datar).`,
+      'Tekan Selesai leg di patok sasaran. Lulus bila ≤30 m dari patok.',
+    ];
+  }
 }
 
 // ======================================================================= level 7: pacing
@@ -870,6 +957,16 @@ class Pacing extends Mission {
   }
 
   devPoints() { return [{ label: 'Bendera hijau', p: this.startP }, { label: 'Bendera merah', p: this.endP }]; }
+
+  devSolution() {
+    const steps = this.calib === null ? 'kalibrasi × 3' : String(this.calib * 3);
+    return [
+      `Berjalan biasa (jangan lari) dari bendera hijau ke bendera merah (azimut ${deg(magneticOf(azimuthTo(this.startP[0], this.startP[1], this.endP[0], this.endP[1])))}, 100 m). Kalibrasi tercatat saat sampai.`,
+      'Tekan Mulai 300 m.',
+      `Berjalan sekitar ${steps} langkah, sebaiknya di medan datar dan terbuka. "Penghitung" di info misi menunjukkan meter sebenarnya.`,
+      'Tekan Selesai saat penghitung di antara 270 dan 330 m.',
+    ];
+  }
 }
 
 // ======================================================================= levels 8–10: navtup (and the final mission)
@@ -1129,6 +1226,24 @@ class Navtup extends Mission {
     if (this.obstacle) pts.splice(1, 0, { label: 'Rintangan', p: this.obstacle });
     return pts;
   }
+
+  devSolution() { return this.legSolution(); }
+
+  /** Solution steps for the navtup leg from startP to the target. */
+  protected legSolution(): string[] {
+    const s = this.startP, t = this.target;
+    const gridAz = azimuthTo(s[0], s[1], t[0], t[1]), mag = magneticOf(gridAz);
+    const legM = M(dist(s, t));
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    const flat = Math.round((legM * calib) / 100);
+    return [
+      `Di peta letakkan busur di ${fmtCoord(s)} dan arahkan ke pos sasaran: azimut ${deg(gridAz)}, panjang ${legM} m (opsional: Gariskan).`,
+      `Tekan Kunci kompas: azimut ${Math.round(mag)}, target langkah sekitar ${Math.round(flat * 1.25)} (${flat} langkah datar × 1,25 untuk hutan dan tanjakan).`,
+      'Tekan Atur posisi tim, lalu maju (joystick/W). Tahan Kiri/Kanan agar simpangan di penunjuk tetap dekat 0°.',
+      ...(this.withObstacle && this.obstacle ? [`Semak berduri ada sekitar ${M(dist(s, this.obstacle))} m dari awal. Saat terhalang: ↶ 90°, maju ±25 m, 90° ↷, maju melewati semak (>${M(dist(s, t) * 0.45 + 3)} m sepanjang garis), 90° ↷, kembali ±25 m, ↶ 90° dan lanjutkan azimut.`] : []),
+      'Saat hitungan langkah mendekati target, tekan Selesai leg dan cari pos (ditemukan <7,5 m).',
+    ];
+  }
 }
 
 class FinalMission extends Navtup {
@@ -1246,6 +1361,24 @@ class FinalMission extends Navtup {
     const pts = [{ label: 'Titik awal', p: this.c.sites.final.start }, { label: 'Pos sasaran', p: this.target }];
     if (this.edgeP) pts.splice(1, 0, { label: 'Titik resection terakhir', p: this.edgeP });
     return pts;
+  }
+
+  devSolution() {
+    const start = this.c.sites.final.start, t = this.target;
+    const h = here(this.c);
+    // The last resection happens wherever the player stops at the forest edge: its answer follows them.
+    const edgeSteps = this.edgeP
+      ? [`Resection terakhir sudah ditandai di ${fmtCoord(this.edgeP)}.`, ...this.legSolution()]
+      : dist(h, start) < 30
+        ? ['Di tepi hutan lakukan resection terakhir. Kunci jawabannya muncul di sini setelah kamu meninggalkan titik awal.']
+        : ['Resection terakhir dari posisimu sekarang:', ...this.resectionKey(h), `Tekan Tandai posisiku dan ketuk ${fmtCoord(h)}.`, 'Langkah navigasi tertutup muncul di sini setelah resection terakhir.'];
+    return [
+      'Utarakan peta (selisih ≤5°).',
+      ...this.resectionKey(start),
+      `Tekan Tandai posisiku dan ketuk ${fmtCoord(start)}.`,
+      `Berjalan ke arah pos sasaran (azimut ${deg(magneticOf(azimuthTo(start[0], start[1], t[0], t[1])))}) sampai "Jarak ke hutan" di info misi ≤38 m, di tempat yang masih melihat titik ekstrem.`,
+      ...edgeSteps,
+    ];
   }
 }
 

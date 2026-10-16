@@ -59,6 +59,10 @@ export class DevTools {
   private keyEl = el('div', '');
   private missionEl = el('div', '');
   private pointsEl = el('div', 'dev-points');
+  /** Collapsed by default so the answers stay hidden until a tester asks for them. */
+  private solution = el('details', 'dev-solution');
+  private solutionList = el('ol', '');
+  private solutionKey = '';
   private logEl = el('div', 'dev-log');
   private flyBtn: HTMLButtonElement;
   private upDown = el('div', 'dev-updown');
@@ -100,7 +104,7 @@ export class DevTools {
         button('Salin laporan', () => void this.copyReport()),
         button('Bersihkan log', () => { this.log = []; this.seen.clear(); this.renderLog(); }),
       ),
-      el('h4', '', 'Misi'), this.missionEl, this.pointsEl,
+      el('h4', '', 'Misi'), this.missionEl, this.pointsEl, this.solution,
       el('h4', '', 'Posisi'), this.posEl,
       el('h4', '', 'Kunci jawaban: titik ekstrem & bidikan'), this.keyEl,
       el('h4', '', 'Log'), this.logEl,
@@ -113,6 +117,8 @@ export class DevTools {
       b.addEventListener('pointercancel', () => this.onUp(0));
       return b;
     };
+    this.solution.append(el('summary', '', 'Langkah penyelesaian (spoiler)'), this.solutionList);
+    this.solution.hidden = true;
     this.upDown.append(hold('▲', 1), hold('▼', -1));
     this.upDown.hidden = true;
     this.root.append(toggle, this.panel, this.upDown);
@@ -323,6 +329,7 @@ export class DevTools {
       this.missionEl.replaceChildren(el('p', 'muted', 'Tidak ada misi lapangan aktif.'));
       this.pointsEl.replaceChildren();
       this.pointsKey = '';
+      this.solution.hidden = true;
     } else {
       const objs = el('div', 'dev-objs', ...m.objectives.map((o, k) => el('div', o.done ? 'ok' : o.optional ? 'muted' : '', `${o.done ? '✓' : '○'} ${k + 1}. ${o.text}${o.optional ? ' (opsional)' : ''}`)));
       this.missionEl.replaceChildren(
@@ -345,6 +352,13 @@ export class DevTools {
           return b;
         }));
       }
+      const steps = m.devSolution();
+      const sk = steps.join('|');
+      if (sk !== this.solutionKey) {
+        this.solutionKey = sk;
+        this.solutionList.replaceChildren(...steps.map((t) => el('li', '', t)));
+      }
+      this.solution.hidden = !steps.length;
     }
     this.renderLog();
   }
@@ -377,6 +391,7 @@ export class DevTools {
         objectives: m.objectives,
         info: Object.fromEntries(m.devInfo()),
         points: m.devPoints(),
+        solution: m.devSolution(),
         result: m.result,
       },
       readings: notebook.readings,

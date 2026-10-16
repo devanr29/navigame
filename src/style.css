@@ -350,6 +350,10 @@ input { user-select: text; -webkit-user-select: text; touch-action: manipulation
 .dev-rows td:first-child { opacity: 0.7; white-space: nowrap; padding-right: 8px; }
 .dev-rows td:last-child { font-family: ui-monospace, monospace; font-size: 11px; word-break: break-word; }
 .dev-objs { margin: 6px 0; }
+.dev-solution { margin-top: 8px; }
+.dev-solution summary { cursor: pointer; font-weight: 600; }
+.dev-solution ol { margin: 6px 0 0; padding-left: 20px; }
+.dev-solution li { margin-bottom: 4px; line-height: 1.35; }
 .dev-objs .ok { color: #7fe39a; }
 .dev-log { font: 11px/1.35 ui-monospace, monospace; }
 .dev-log > div { padding: 2px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
