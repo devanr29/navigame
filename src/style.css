@@ -67,6 +67,12 @@ html, body {
   display: flex; gap: 8px;
 }
 #btn-jump { position: absolute; right: calc(24px + var(--safe-r)); bottom: 28px; background: var(--panel); border-color: rgba(255,255,255,0.35); }
+/* Above the jump button (bottom right, clear of the top bar and the centred heading strip). */
+#btn-view {
+  position: absolute; right: calc(34px + var(--safe-r)); bottom: 112px; width: 52px; height: 52px; font-size: 11px;
+  background: var(--panel); border-color: rgba(255,255,255,0.35);
+}
+#btn-view.on { background: var(--accent); border-color: var(--accent-2); }
 #fps {
   position: absolute; top: 10px; left: calc(10px + var(--safe-l));
   font: 600 11px/1.3 ui-monospace, monospace;
@@ -206,14 +212,19 @@ html, body {
 .nb-input { width: 64px; font-size: 15px; padding: 5px; border: 1px solid #b9b19c; border-radius: 6px; }
 .nb-check.ok { color: #1d8a3a; font-weight: 700; }
 .nb-check.bad { color: #c8302a; font-weight: 700; }
-.nb-note { padding: 2px 0; }
+.nb-note { padding: 2px 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.nb-del { margin-left: auto; min-width: 38px; }
+#notebook .nb-del.armed { background: #c8302a; border-color: #8a1f1b; color: #fff; }
 #notebook .warn { color: #a3520a; }
 
 /* ---- map tools ---- */
-.map-tools {
-  position: absolute; left: calc(10px + var(--safe-l)); bottom: 10px;
-  display: flex; flex-wrap: wrap; gap: 5px; max-width: 64vw;
+/* Bottom-left dock: a pending request (banner) sits above the tool palette. */
+.map-dock {
+  position: absolute; left: calc(10px + var(--safe-l)); bottom: 10px; max-width: 72vw;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none;
 }
+.map-tools { display: flex; flex-wrap: wrap; gap: 4px; pointer-events: auto; }
+.map-tools .btn.small { padding: 6px 9px; min-height: 34px; min-width: 0; }
 .map-readout {
   position: absolute; right: calc(10px + var(--safe-r)); bottom: 58px;
   background: rgba(12, 18, 14, 0.82); padding: 6px 10px; border-radius: 8px; font: 600 13px system-ui, sans-serif;
@@ -221,10 +232,9 @@ html, body {
 .prot-bar { position: absolute; right: calc(10px + var(--safe-r)); bottom: 10px; display: flex; gap: 5px; align-items: center; }
 .prot-bar .btn:disabled { opacity: 0.45; }
 .prot-input { width: 72px; font-size: 16px; padding: 7px; border-radius: 8px; border: 2px solid var(--accent-2); }
-/* Requests sit where the tool palette was (the palette is hidden meanwhile), so the map stays clear. */
+/* Requests sit in the bottom-left dock, small, so the map stays clear. */
 .map-banner {
-  position: absolute; bottom: 10px; left: calc(10px + var(--safe-l));
-  max-width: min(560px, 66vw); display: flex; gap: 8px; align-items: center;
+  max-width: min(560px, 64vw); display: flex; gap: 8px; align-items: center;
   background: rgba(150, 36, 32, 0.86); padding: 6px 8px 6px 11px; border-radius: 10px; font: 600 12px/1.3 system-ui, sans-serif;
   pointer-events: none;
 }
@@ -235,11 +245,17 @@ html, body {
 }
 .map-orient.ok { background: rgba(29, 138, 58, 0.92); }
 .map-notes {
-  position: absolute; top: 62px; left: calc(10px + var(--safe-l)); max-width: min(280px, 40vw);
-  background: rgba(251, 248, 239, 0.9); color: #1d1d1b; border: 1px solid #b9b19c; border-radius: 8px;
-  padding: 5px 9px; font: 600 12px/1.45 ui-monospace, Menlo, monospace;
+  position: absolute; top: 62px; left: calc(10px + var(--safe-l)); max-width: min(300px, 40vw);
+  background: rgba(251, 248, 239, 0.92); color: #1d1d1b; border: 1px solid #b9b19c; border-radius: 8px;
+  padding: 3px 9px 5px; font: 600 12px/1.45 ui-monospace, Menlo, monospace;
 }
-.map-notes-head { font: 700 11px system-ui, sans-serif; opacity: 0.7; }
+.map-notes-head {
+  font: 700 12px system-ui, sans-serif; color: #1d1d1b; opacity: 0.75; background: none; border: 0;
+  padding: 4px 0; min-height: 28px; cursor: pointer; touch-action: manipulation;
+}
+/* Any number of readings: the list scrolls inside the panel and stops above the tool dock. */
+.map-notes-list { max-height: max(72px, calc(100vh - 262px)); overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; }
+.map-notes-list > div { padding: 1px 0; border-top: 1px dashed #d6cfbd; white-space: nowrap; }
 
 /* ---- menu screens ---- */
 #screen {

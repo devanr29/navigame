@@ -24,7 +24,7 @@ export const DISTRACTORS: { name: string; job: string; why: string }[] = [
   { name: 'GPS', job: 'Menunjukkan posisi otomatis', why: 'GPS tidak dipakai: posisi harus ditemukan sendiri dengan peta dan kompas.' },
   { name: 'Senter', job: 'Penerangan saat gelap', why: 'Senter berguna untuk berkegiatan, tetapi bukan alat navigasi darat.' },
   { name: 'Spidol', job: 'Menebalkan garis di peta', why: 'Spidol merusak peta dan tidak bisa dihapus; menggaris memakai pensil.' },
-  { name: 'Kalkulator', job: 'Menghitung jarak dan azimut', why: 'Azimut balik dan skala dihitung sendiri; kalkulator bukan alat navigasi darat.' },
+  { name: 'Kalkulator', job: 'Menghitung jarak dan azimut', why: 'Back azimuth dan skala dihitung sendiri; kalkulator bukan alat navigasi darat.' },
   { name: 'Peluit', job: 'Memberi tanda darurat', why: 'Peluit adalah perlengkapan darurat, bukan alat navigasi darat.' },
   { name: 'Teropong', job: 'Melihat objek di kejauhan', why: 'Titik ekstrem dibidik dengan kompas; teropong bukan alat navigasi darat.' },
   { name: 'Jas hujan', job: 'Melindungi dari hujan', why: 'Jas hujan adalah perlengkapan pribadi, bukan alat navigasi darat.' },

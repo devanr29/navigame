@@ -47,6 +47,25 @@ export class Notebook {
       if (cls) e.className = cls;
       return e;
     };
+    // Delete takes two taps (✕, then "Hapus?") so a stray touch does not lose a reading.
+    const del = (remove: () => void) => {
+      const d = document.createElement('button');
+      d.className = 'btn ghost small nb-del';
+      d.textContent = '✕';
+      d.setAttribute('aria-label', 'Hapus catatan');
+      d.addEventListener('click', () => {
+        if (d.dataset.armed) {
+          remove();
+          this.onChange();
+          this.render();
+          return;
+        }
+        d.dataset.armed = '1';
+        d.textContent = 'Hapus?';
+        d.classList.add('armed');
+      });
+      return d;
+    };
     b.append(h('h3', 'Bidikan kompas'));
     if (this.readings.length === 0) b.append(h('p', 'Belum ada bidikan. Tahan tombol Kompas, bidik, lalu lepas.', 'muted'));
     if (!this.canWrite) b.append(h('p', 'Tidak membawa pena atau pensil: catatan tidak bisa ditulis.', 'warn'));
@@ -61,7 +80,7 @@ export class Notebook {
       pair.disabled = !this.canWrite;
       pair.addEventListener('click', () => this.onPair(i));
       row.append(pair);
-      const lab = h('label', 'Az. balik', 'nb-lab');
+      const lab = h('label', 'Back az.', 'nb-lab');
       const inp = document.createElement('input');
       inp.type = 'number';
       inp.inputMode = 'decimal';
@@ -82,13 +101,17 @@ export class Notebook {
         this.onChange();
       });
       lab.append(inp);
-      row.append(lab, mark);
+      row.append(lab, mark, del(() => this.readings.splice(i, 1)));
       b.append(row);
     });
-    b.append(h('p', 'Aturan azimut balik: di bawah 180° tambah 180°, di atas 180° kurangi 180°, tepat 180° menjadi 0°.', 'muted'));
+    b.append(h('p', 'Aturan back azimuth: di bawah 180° tambah 180°, di atas 180° kurangi 180°, tepat 180° menjadi 0°.', 'muted'));
     if (this.notes.length) {
       b.append(h('h3', 'Catatan'));
-      for (const n of this.notes) b.append(h('div', n, 'nb-note'));
+      this.notes.forEach((n, k) => {
+        const row = h('div', '', 'nb-note');
+        row.append(h('span', n), del(() => this.notes.splice(k, 1)));
+        b.append(row);
+      });
     }
   }
 }

@@ -4,8 +4,10 @@ import { BLOCK_M, type WorldData } from '../gen/constants';
 import type { Input } from './input';
 
 const EYE = 1.7 / BLOCK_M; // eye height: 1.7 m
-const WALK = 4.5 / BLOCK_M; // 4.5 m/s
-const RUN = 8 / BLOCK_M; // 8 m/s
+// Brisker than real walking (about 1.4 m/s) so a lesson fits a class session; the pace counter still
+// counts steps from the distance covered, not from time.
+const WALK = 6.5 / BLOCK_M; // 6.5 m/s
+const RUN = 11 / BLOCK_M; // 11 m/s
 const STEP = 1.05; // climbs one block automatically
 const GRAVITY = 22;
 const JUMP_V = 7;
@@ -159,6 +161,9 @@ export class Player {
     this.moved = 0;
     this.rose = 0;
   }
+
+  /** Smoothed foot height (the camera's, so a body drawn here moves with the view). */
+  get viewFootY() { return this.camY; }
 
   applyCamera(cam: THREE.PerspectiveCamera) {
     cam.position.set(this.x, this.camY + EYE, this.z);

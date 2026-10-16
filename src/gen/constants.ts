@@ -1,7 +1,10 @@
 // World scale and map conventions. Values marked "GDD" come from docs/GDD.md.
 
-/** World edge length in blocks (GDD: about 800 x 800 blocks = 2 x 2 km). */
-export const WORLD_SIZE = 800;
+/**
+ * World edge length in blocks. The GDD started from 800 x 800 blocks (2 x 2 km); playtests showed a
+ * lesson must fit a 45-minute class, so the world is 600 x 600 blocks = 1.5 x 1.5 km.
+ */
+export const WORLD_SIZE = 600;
 
 /** Metres per block, horizontally and vertically (GDD). */
 export const BLOCK_M = 2.5;

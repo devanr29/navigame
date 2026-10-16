@@ -27,8 +27,14 @@ describe('world generation', () => {
   it.each(['jamadagni', 'navter', '42', 'seed-x'])('seed %s has every required feature', (seed) => {
     const w = seed === 'jamadagni' ? a : generateWorld(seed);
     const N = w.size;
-    const kinds = w.landmarks.map((l) => l.kind).sort();
+    const kinds = [...new Set(w.landmarks.map((l) => l.kind))].sort();
     expect(kinds).toEqual(['bridge', 'hut', 'lonetree', 'monument', 'peak', 'tower']);
+    // the main landmarks keep their indices; extra hilltops follow, each with its own name
+    expect(w.landmarks.slice(0, 6).map((l) => l.kind)).toEqual(['peak', 'tower', 'hut', 'bridge', 'lonetree', 'monument']);
+    const hills = w.landmarks.slice(6);
+    expect(hills.length).toBeGreaterThanOrEqual(1);
+    expect(hills.every((l) => l.kind === 'peak')).toBe(true);
+    expect(new Set(w.landmarks.map((l) => l.name)).size).toBe(w.landmarks.length);
     for (const l of w.landmarks) {
       expect(l.x).toBeGreaterThan(0);
       expect(l.x).toBeLessThan(N);

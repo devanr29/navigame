@@ -30,7 +30,8 @@ const C = {
 
 interface Label { x: number; z: number; a: number; text: string }
 
-export type MapTool = 'geser' | 'pensil' | 'hapus' | 'penggaris' | 'busur' | 'titik';
+/** 'tanda' only exists while a mission asks for a point (destination, own position). */
+export type MapTool = 'geser' | 'tanda' | 'pensil' | 'hapus' | 'penggaris' | 'busur' | 'titik';
 
 /** A point on the map shown with a symbol (mission posts with known coordinates). */
 export interface MapSymbol { x: number; z: number; label: string; id: number }
@@ -43,7 +44,7 @@ type Request =
   | { kind: 'symbol'; prompt: string; done: (id: number) => void };
 
 const TOOL_LABEL: Record<MapTool, string> = {
-  geser: 'Geser', pensil: 'Pensil', hapus: 'Hapus', penggaris: 'Penggaris', busur: 'Busur', titik: 'Titik',
+  geser: 'Geser', tanda: 'Tanda', pensil: 'Pensil', hapus: 'Hapus', penggaris: 'Penggaris', busur: 'Busur', titik: 'Titik',
 };
 
 export class MapView {
@@ -87,6 +88,8 @@ export class MapView {
 
   // tools and mission hooks
   private tool: MapTool = 'geser';
+  /** Tool in use before a mark request switched to 'tanda'. */
+  private toolBefore: MapTool = 'geser';
   private tools = new Set<ToolId>();
   private lockRot = false;
   private request: Request | null = null;
@@ -112,6 +115,7 @@ export class MapView {
   private notesOpen = true;
   private notes: string[] = [];
   private toolBtns = new Map<MapTool, HTMLButtonElement>();
+  private avail: Record<MapTool, boolean> = { geser: true, tanda: false, pensil: false, hapus: false, penggaris: false, busur: false, titik: false };
   /** Compass reading shown on the map while in the field (null: no compass or not in the field). */
   heading: number | null = null;
 
@@ -190,12 +194,11 @@ export class MapView {
     // Field notebook entries that are ready to draw (paired, back azimuth written).
     this.notesEl = div('map-notes');
     this.notesEl.hidden = true;
-    this.notesEl.addEventListener('click', () => {
-      this.notesOpen = !this.notesOpen;
-      this.renderNotes();
-    });
 
-    root.append(this.toolbar, this.readout, this.protBar, this.rulerBar, this.banner, this.orientEl, this.notesEl);
+    // Bottom-left dock: a pending request above the tool palette, so neither covers the other.
+    const dock = div('map-dock');
+    dock.append(this.banner, this.toolbar);
+    root.append(dock, this.readout, this.protBar, this.rulerBar, this.orientEl, this.notesEl);
 
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -271,12 +274,14 @@ export class MapView {
     const canDraw = tools.has('pensil') || tools.has('pena');
     const avail: Record<MapTool, boolean> = {
       geser: true,
+      tanda: this.request?.kind === 'mark',
       pensil: canDraw,
       hapus: tools.has('penghapus'),
       penggaris: tools.has('penggaris'),
       busur: tools.has('busur'),
       titik: canDraw,
     };
+    this.avail = avail;
     for (const [t, b] of this.toolBtns) b.hidden = !avail[t];
     this.lockBtn.hidden = !tools.has('papan');
     if (!tools.has('papan')) this.lockRot = false;
@@ -294,6 +299,7 @@ export class MapView {
     this.reveals = [];
     this.request = null;
     this.banner.hidden = true;
+    this.setTools(this.tools);
     this.rulerLive = false;
     this.notes = [];
     this.renderNotes();
@@ -308,6 +314,11 @@ export class MapView {
   /** Asks the player to place a point on the map and press Kirim. */
   requestMark(prompt: string, done: (x: number, z: number) => void) {
     this.request = { kind: 'mark', prompt, done, at: null };
+    // The packed tools stay available (ruler, protractor, pencil) to work the point out; the
+    // 'tanda' tool places the point itself.
+    if (this.tool !== 'tanda') this.toolBefore = this.tool;
+    this.setTools(this.tools);
+    this.setTool('tanda');
     this.showBanner(prompt, true);
   }
 
@@ -332,14 +343,20 @@ export class MapView {
 
   private renderNotes() {
     this.notesEl.hidden = this.notes.length === 0;
-    this.notesEl.replaceChildren(div('map-notes-head'));
-    this.notesEl.firstElementChild!.textContent = `Catatan ${this.notesOpen ? '▾' : '▸'}`;
-    if (!this.notesOpen) return;
+    const head = button(`Catatan (${this.notes.length}) ${this.notesOpen ? '▾' : '▸'}`, 'map-notes-head');
+    head.addEventListener('click', () => {
+      this.notesOpen = !this.notesOpen;
+      this.renderNotes();
+    });
+    // The list scrolls inside the panel, so any number of readings fits.
+    const list = div('map-notes-list');
+    list.hidden = !this.notesOpen;
     for (const n of this.notes) {
       const row = div('');
       row.textContent = n;
-      this.notesEl.append(row);
+      list.append(row);
     }
+    this.notesEl.replaceChildren(head, list);
   }
 
   /** Sheet point under the centre crosshair, snapped to a nearby symbol or mark. */
@@ -369,7 +386,8 @@ export class MapView {
 
   /** Shows only the controls that make sense right now. A pending request hides the tools. */
   private syncChrome() {
-    const req = this.request !== null;
+    // A symbol request only needs a tap on a symbol, so it hides the tools; a mark request keeps them.
+    const req = this.request?.kind === 'symbol';
     this.toolbar.hidden = req;
     this.protBar.hidden = req || this.tool !== 'busur';
     this.rulerBar.hidden = req || this.tool !== 'penggaris';
@@ -399,8 +417,13 @@ export class MapView {
   }
 
   private endRequest() {
+    const wasMark = this.request?.kind === 'mark';
     this.request = null;
     this.banner.hidden = true;
+    if (wasMark) {
+      this.setTools(this.tools);
+      this.setTool(this.avail[this.toolBefore] ? this.toolBefore : 'geser');
+    }
     this.syncChrome();
     this.dirty = true;
   }
@@ -444,7 +467,7 @@ export class MapView {
       if (!this.ruler) this.readout.textContent = 'Geser peta: taruh titik di tanda + lalu tekan Titik awal';
       else {
         const blocks = Math.hypot(this.ruler.bx - this.ruler.ax, this.ruler.bz - this.ruler.az);
-        this.readout.textContent = `Penggaris: ${fmtCm(blocks)} cm`;
+        this.readout.textContent = `Penggaris: ${fmtCm(blocks)} cm = ${fmtNum(Math.round(blocks * BLOCK_M))} m di medan`;
       }
     } else if (this.tool === 'busur') {
       if (!this.protractor) this.readout.textContent = 'Ketuk titik untuk meletakkan busur';
@@ -651,7 +674,7 @@ export class MapView {
     this.drawReveals(m);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    if (this.tool === 'penggaris' && !this.request) this.drawCrosshair(W / 2, H / 2);
+    if (this.tool === 'penggaris' && this.request?.kind !== 'symbol') this.drawCrosshair(W / 2, H / 2);
     if (this.loupe) this.drawLoupe(this.loupe.x, this.loupe.y, W);
     if (this.showLegend) this.drawLegend(W, H);
   }
@@ -1136,11 +1159,18 @@ export class MapView {
     }
     if (e.pointerType === 'mouse' && e.button === 2) { this.gesture = 'pan'; return; }
     const [x, z] = this.screenToSheet(e.clientX, e.clientY);
-    if (this.request) {
-      // A placed mark can be dragged into place; elsewhere a tap places it and a drag pans.
-      const at = this.request.kind === 'mark' ? this.request.at : null;
-      this.gesture = at && Math.hypot(at[0] - x, at[1] - z) * this.zoom < 30 ? 'mark-move' : 'tool';
-      if (this.request.kind === 'mark') this.setLoupe(e);
+    if (this.request?.kind === 'symbol') {
+      // Tap a symbol; a drag pans.
+      this.gesture = 'tool';
+      this.dirty = true;
+      return;
+    }
+    if (this.request?.kind === 'mark' && this.tool === 'tanda') {
+      // Press, slide while watching the loupe, release to place. The map does not move meanwhile
+      // (pan with two fingers or the Geser tool).
+      this.gesture = 'mark-move';
+      this.request.at = [x, z];
+      this.setLoupe(e);
       this.dirty = true;
       return;
     }
@@ -1230,10 +1260,8 @@ export class MapView {
       this.dirty = true;
     } else if (this.gesture === 'tool' || this.gesture === 'busur-move') {
       const [x, z] = this.screenToSheet(e.clientX, e.clientY);
-      if (this.request) {
-        // While placing a requested mark, a one-finger drag pans; only a tap places the mark.
-        if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 10) { this.gesture = 'pan'; this.loupe = null; }
-        else this.setLoupe(e);
+      if (this.request?.kind === 'symbol') {
+        if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 10) this.gesture = 'pan';
       } else if (this.tool === 'titik') {
         this.setLoupe(e);
       } else if (this.tool === 'pensil' && this.drawing) {
@@ -1264,17 +1292,14 @@ export class MapView {
     if (this.gesture === 'mark-move' && this.request?.kind === 'mark') this.bannerOk.disabled = false;
     if (this.gesture === 'tool' && this.pointers.size === 0) {
       const [x, z] = this.screenToSheet(e.clientX, e.clientY);
-      if (this.request?.kind === 'mark' && tap) {
-        this.request.at = [x, z];
-        this.bannerOk.disabled = false;
-      } else if (this.request?.kind === 'symbol' && tap) {
+      if (this.request?.kind === 'symbol' && tap) {
         const id = this.pickSymbol(x, z);
         if (id >= 0) {
           const r = this.request;
           this.endRequest();
           r.done(id);
         }
-      } else if (this.tool === 'titik' && !this.request) {
+      } else if (this.tool === 'titik') {
         // Press, slide while watching the loupe, release to place.
         const wt = this.writeTool();
         if (wt) this.marks.push({ x, z, label: String(this.marks.length + 1), pen: wt === 'pena' });

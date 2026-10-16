@@ -150,7 +150,7 @@ export function findSites(w: WorldData): Sites {
       if (avoid.some((a) => dist(a, s) < 120) || out.some((o) => dist(o.start, s) < 120)) continue;
       for (let k = 0; k < 24; k++) {
         const ang = rng() * Math.PI * 2;
-        const L = 110 + rng() * 50;
+        const L = 90 + rng() * 40;
         const t: P = [s[0] + Math.sin(ang) * L, s[1] - Math.cos(ang) * L];
         if (!inside(t[0], t[1], 10)) continue;
         const ti = idx(t[0], t[1]);
@@ -164,9 +164,9 @@ export function findSites(w: WorldData): Sites {
     return out;
   };
 
-  // Level 10 start: open spot 60–160 blocks (150–400 m) from the forest with a good resection.
+  // Level 10 start: open spot 50–130 blocks (125–325 m) from the forest with a good resection.
   const finalStart = pickSpot(
-    (s) => { const d = toForest[idx(s.x, s.z)]; return d >= 60 && d <= 160 && s.q >= 40; },
+    (s) => { const d = toForest[idx(s.x, s.z)]; return d >= 50 && d <= 130 && s.q >= 40; },
     (s) => s.q + rng() * 8,
     resection,
   );
@@ -180,7 +180,7 @@ export function findSites(w: WorldData): Sites {
     outer: for (const { c } of edgesByDist) {
       for (let k = 0; k < 20; k++) {
         const ang = rng() * Math.PI * 2;
-        const L = 100 + rng() * 50;
+        const L = 90 + rng() * 40;
         const t: P = [c[0] + Math.sin(ang) * L, c[1] - Math.cos(ang) * L];
         if (!inside(t[0], t[1], 10)) continue;
         const ti = idx(t[0], t[1]);
@@ -225,13 +225,13 @@ export function findSites(w: WorldData): Sites {
   }
   const intersection = inter ?? { a: w.spawn, b: [w.spawn[0], w.spawn[1] + 100] as P, smoke: [w.spawn[0] + 150, w.spawn[1] + 50] as P };
 
-  // ---- declination leg: straight, open, dry, 170–210 blocks (425–525 m)
+  // ---- declination leg: straight, open, dry, 130–160 blocks (325–400 m)
   let decl: Sites['declination'] | null = null;
   for (let k = 0; k < 400 && !decl; k++) {
     const s: P = [30 + rng() * (N - 60), 30 + rng() * (N - 60)];
     if (!isOpen(s[0], s[1]) || nearSurface(s[0], s[1], 4, Surface.Path)) continue;
     const ang = rng() * Math.PI * 2;
-    const L = 170 + rng() * 40;
+    const L = 130 + rng() * 30;
     const t: P = [s[0] + Math.sin(ang) * L, s[1] - Math.cos(ang) * L];
     if (!isOpen(t[0], t[1])) continue;
     // Walkable on foot along the straight line: no water, no step over one block, modest total climb.
@@ -252,7 +252,7 @@ export function findSites(w: WorldData): Sites {
     if (hi - lo > 24) ok = false;
     if (ok && open / L > 0.9) decl = { start: s, target: t };
   }
-  const declination = decl ?? { start: w.spawn, target: [w.spawn[0] + 180, w.spawn[1]] as P };
+  const declination = decl ?? { start: w.spawn, target: [w.spawn[0] + 140, w.spawn[1]] as P };
 
   // ---- pace course: 40 blocks (100 m) of trail with little climb
   let pace: Sites['pace'] | null = null;

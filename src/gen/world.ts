@@ -11,6 +11,9 @@ export type Progress = (stage: string, frac: number) => void;
 
 type P = [number, number];
 
+/** Names for the smaller hilltops (fictional, in the style of West Java place names). */
+const HILL_NAMES = ['Bukit Pasir Angin', 'Bukit Tenjo', 'Bukit Cikoneng', 'Bukit Batu Kuda', 'Bukit Lingga', 'Bukit Pangparang'];
+
 const MAIN_HALF_W = 3; // main river channel half-width in blocks (about 15 m wide)
 const TRIB_HALF_W = 1.5;
 
@@ -23,6 +26,8 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   const nWarp = makeSimplex(rng);
   const nForest = makeSimplex(rng);
   const J = (s: number) => (rng() * 2 - 1) * s;
+  // Horizontal sizes below were tuned for an 800-block world; S scales them to the current size.
+  const S = N / 800;
 
   // The layout is a fixed template (river on one side, two mountains joined by a ridge on the other,
   // forest in a corner) that each seed mirrors / transposes and jitters, so every world has every feature.
@@ -42,18 +47,18 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   const mB = T(0.72 + J(0.04), 0.74 + J(0.04)); // second peak (radio tower)
   const hills: { c: P; r2: number; a: number }[] = [];
   for (let i = 0; i < 4; i++) {
-    const r = 55 + rng() * 45;
+    const r = (55 + rng() * 45) * S;
     hills.push({ c: T(0.05 + rng() * 0.16, 0.1 + i * 0.22 + J(0.05)), r2: r * r, a: 16 + rng() * 18 });
   }
-  hills.push({ c: T(0.47 + J(0.03), 0.05 + rng() * 0.25), r2: 70 * 70, a: 14 + rng() * 10 });
+  hills.push({ c: T(0.47 + J(0.03), 0.05 + rng() * 0.25), r2: (70 * S) ** 2, a: 14 + rng() * 10 });
 
   const heightF = new Float32Array(NN);
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       let h = 14;
-      h += 80 * bump(d2(x, z, mA), 215 * 215);
-      h += 66 * bump(d2(x, z, mB), 185 * 185);
-      h += 40 * bump(d2seg(x, z, mA, mB), 85 * 85);
+      h += 80 * bump(d2(x, z, mA), (215 * S) ** 2);
+      h += 66 * bump(d2(x, z, mB), (185 * S) ** 2);
+      h += 40 * bump(d2seg(x, z, mA, mB), (85 * S) ** 2);
       for (const hl of hills) h += hl.a * bump(d2(x, z, hl.c), hl.r2);
       const m = clamp01((h - 14) / 80);
       h += fbm(nBase, x / 190, z / 190, 5) * 12;
@@ -94,7 +99,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   // ---------------------------------------------------------------- 3. Forest zone
   const zone = new Uint8Array(NN);
   const fc = T(0.17 + J(0.03), 0.75 + J(0.03));
-  const fr = N * 0.17;
+  const fr = N * 0.19;
   for (let z = 0; z < N; z++) {
     for (let x = 0; x < N; x++) {
       const i = z * N + x;
@@ -182,6 +187,40 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   const tugu = clampIn(argmaxNear(hills[hills.length - 1].c, 45), 8) as P;
   flatten(tugu, 1);
   markSolid(tugu[0], tugu[1]);
+
+  // Every other open hilltop gets a triangulation pillar too, so each hill seen in the field is a
+  // titik ekstrem on the map. Hilltops: highest point within 26 blocks, standing at least 7 blocks
+  // (17.5 m) above the ground 34 blocks around it, away from the other landmarks.
+  const hilltops: P[] = [];
+  {
+    const taken: P[] = [peak, tower, hutC, lone, tugu];
+    const cands: { p: P; prom: number }[] = [];
+    for (let z = 20; z < N - 20; z += 4) {
+      for (let x = 20; x < N - 20; x += 4) {
+        const h0 = heightF[z * N + x];
+        if (h0 < sampleH(x + 4, z) || h0 < sampleH(x - 4, z) || h0 < sampleH(x, z + 4) || h0 < sampleH(x, z - 4)) continue;
+        const p = argmaxNear([x, z], 6);
+        const top = argmaxNear(p, 26);
+        if (top[0] !== p[0] || top[1] !== p[1]) continue;
+        const i = p[1] * N + p[0];
+        if (zone[i] !== Zone.Open || water[i] >= 0) continue;
+        let ring = 0;
+        for (let k = 0; k < 24; k++) {
+          const a = (k / 24) * Math.PI * 2;
+          ring += sampleH(p[0] + Math.cos(a) * 34, p[1] + Math.sin(a) * 34);
+        }
+        const prom = heightF[i] - ring / 24;
+        if (prom >= 7) cands.push({ p, prom });
+      }
+    }
+    cands.sort((a, b) => b.prom - a.prom);
+    for (const c of cands) {
+      if (hilltops.length >= 6) break;
+      if ([...taken, ...hilltops].some((t) => d2(c.p[0], c.p[1], t) < 70 * 70)) continue;
+      hilltops.push(c.p);
+    }
+    for (const h of hilltops) { flatten(h, 1); markSolid(h[0], h[1]); }
+  }
   syncHeight();
   onProgress('Menempatkan titik ekstrem', 1);
 
@@ -234,7 +273,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
 
   // ---------------------------------------------------------------- 7. Trees (deterministic per cell)
   onProgress('Menanam pohon', 0);
-  const landmarkPts: P[] = [peak, tower, hutC, lone, tugu, [Math.floor(bc[0]), Math.floor(bc[1])]];
+  const landmarkPts: P[] = [peak, tower, hutC, lone, tugu, [Math.floor(bc[0]), Math.floor(bc[1])], ...hilltops];
   const treeList: number[] = [];
   for (let z = 1; z < N - 1; z++) {
     for (let x = 1; x < N - 1; x++) {
@@ -266,6 +305,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     { kind: 'bridge', name: 'Jembatan', x: bc[0], z: bc[1], y: bLevel + 1, dir, halfLen },
     { kind: 'lonetree', name: 'Pohon Beringin', x: lone[0] + 0.5, z: lone[1] + 0.5, y: height[lone[1] * N + lone[0]] },
     { kind: 'monument', name: 'Tugu Batas', x: tugu[0] + 0.5, z: tugu[1] + 0.5, y: height[tugu[1] * N + tugu[0]] },
+    ...hilltops.map((h, k): Landmark => ({ kind: 'peak', name: HILL_NAMES[k], x: h[0] + 0.5, z: h[1] + 0.5, y: height[h[1] * N + h[0]] })),
   ];
 
   const spawnPoly = trails[0];

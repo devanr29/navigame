@@ -83,7 +83,7 @@ await centreOn(600, 600);
 await page.waitForTimeout(100);
 const ro2 = await page.locator('.map-readout').textContent();
 check('ruler buttons: 200 blocks = 2 cm, end stays after Titik akhir', /2,0\d cm|1,9\d cm/.test(ro2), ro2);
-check('map notes list the paired reading with its back azimuth', /balik/.test(await page.locator('.map-notes').textContent()), await page.locator('.map-notes').textContent());
+check('map notes list the paired reading with its back azimuth', /back az/.test(await page.locator('.map-notes').textContent()), await page.locator('.map-notes').textContent());
 
 await tool('Pensil');
 await page.mouse.move(ax, ay + 40); await page.mouse.down(); await page.mouse.move(bx, by + 40, { steps: 10 }); await page.mouse.up();
@@ -105,8 +105,50 @@ await page.locator('.map-tools button', { hasText: 'Kunci arah' }).click();
 await page.keyboard.press('KeyE');
 check('unlocked map rotates', (await g(() => window.__game.map.rot)) !== r0);
 
+// --- marking a position: the packed tools stay usable, and Tanda press-slide-release never pans
+await page.locator('#actions button', { hasText: 'Tandai posisiku' }).dispatchEvent('pointerdown').catch(() => {});
+await g(() => { if (!window.__game.map.hasRequest()) void window.__game.askMark('uji'); });
+await page.waitForSelector('.map-banner:not([hidden])');
+const reqTools = await page.locator('.map-tools button:not([hidden])').allTextContents();
+check('mark request keeps the tools and adds Tanda', reqTools.includes('Penggaris') && reqTools.includes('Tanda') && reqTools.includes('Pensil'), reqTools.join(','));
+check('Tanda is the active tool', (await page.locator('.map-tools button.on').textContent()) === 'Tanda');
+const view0 = await g(() => [window.__game.map.cx, window.__game.map.cz]);
+await page.mouse.move(ax, ay + 20); await page.mouse.down(); await page.mouse.move(ax + 60, ay + 50, { steps: 8 }); await page.mouse.up();
+const view1 = await g(() => [window.__game.map.cx, window.__game.map.cz]);
+check('Tanda slide does not pan the map', view0[0] === view1[0] && view0[1] === view1[1], `${view0} -> ${view1}`);
+const at = await g(() => window.__game.map.request?.at);
+const want = await g(([x, y]) => window.__game.map.screenToSheet(x, y), [ax + 60, ay + 50]);
+check('mark lands where the finger was released', at && Math.hypot(at[0] - want[0], at[1] - want[1]) < 0.5, JSON.stringify(at));
+await tool('Penggaris');
+check('ruler bar shows during a mark request', await page.locator('.prot-bar:not([hidden])', { hasText: 'Titik awal' }).isVisible());
+await page.locator('.map-banner button', { hasText: 'Batal' }).click();
+check('tool palette restored after the request', !(await page.locator('.map-tools button', { hasText: 'Tanda' }).isVisible()));
+await page.locator('#map-close').click();
+
+// --- notebook: delete takes two taps
+await page.locator('#btn-notebook').dispatchEvent('pointerdown');
+const n0 = await g(() => window.__game.notebook.readings.length);
+await page.locator('.nb-row .nb-del').first().click();
+check('first tap only arms delete', (await g(() => window.__game.notebook.readings.length)) === n0);
+await page.locator('.nb-row .nb-del').first().click();
+check('second tap deletes the reading', (await g(() => window.__game.notebook.readings.length)) === n0 - 1);
+await page.locator('#notebook-close').click();
+
+// --- third-person camera
+await page.locator('#btn-view').dispatchEvent('pointerdown');
+await page.waitForTimeout(400);
+const tp = await g(() => {
+  const G = window.__game, c = G.camera.position;
+  return { body: G.body.group.visible, d: Math.hypot(c.x - G.player.x, c.z - G.player.z) };
+});
+check('third person shows the body behind the player', tp.body && tp.d > 0.5, JSON.stringify(tp));
+await page.screenshot({ path: 'e2e/out/third-person.png' });
+await page.locator('#btn-view').dispatchEvent('pointerdown');
+await page.waitForTimeout(300);
+check('first person hides the body', !(await g(() => window.__game.body.group.visible)));
+
 // objectives should reflect the work
-const obj = await g(() => window.__game.mission.objectives.map((o) => `${o.done ? '✓' : '○'} ${o.text}`));
+const obj =await g(() => window.__game.mission.objectives.map((o) => `${o.done ? '✓' : '○'} ${o.text}`));
 console.log(obj.join('\n'));
 console.log('page errors:', errors);
 await page.screenshot({ path: 'e2e/out/tools.png' });

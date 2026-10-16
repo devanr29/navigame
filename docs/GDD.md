@@ -49,7 +49,7 @@ The world and the map come from one seeded heightmap, so every contour, ridge an
 - 1 block = 2.5 m, horizontally and vertically.
 - The 12.5 m contour interval = 5 blocks of height, easy to count while walking.
 - Map scale 1:25,000, so 1 cm on the map = 250 m = 100 blocks.
-- A first world of about 2 × 2 km = 800 × 800 blocks, loaded in chunks.
+- A world of 1.5 × 1.5 km = 600 × 600 blocks, loaded in chunks. (First built at 2 × 2 km; playtests showed a lesson must fit a 45-minute class, so the world was narrowed, walking made brisker than real life, and every open hilltop carries a triangulation pillar so each hill seen in the field is a titik ekstrem on the map.)
 
 **Terrain features to include:**
 
@@ -109,7 +109,7 @@ At voxel scale, the text cannot be read on the character. Use the full logo imag
 
 **Telling the team apart in navtup:** all four wear the same outfit, so roles are shown by what each carries. Penerabas holds a golok, sweeper a small rake or brush, compasman a raised compass, stringlineman a string spool. A different flannel colour per role is an option if they are still hard to tell apart on a small screen.
 
-**Views:** the game is played in first person, so the player mostly sees flannel sleeves and hands holding the compass or map. A third-person view on the briefing and debrief screens shows the full outfit and the scarf from the back.
+**Views:** the game is played in first person, so the player mostly sees flannel sleeves and hands holding the compass or map. A Kamera button switches the field view to third person (behind the player); raising the compass always returns to the eye. A turning character on the briefing and debrief screens shows the full outfit, the face, and the scarf from the back.
 
 **Assets for Claude Code:** put the logo image in the project as `assets/logo-jamadagni.png` and the scarf photos in `docs/reference/`. Ask it to build the character as simple blocky body parts (like a Minecraft player model) with the textures above.
 

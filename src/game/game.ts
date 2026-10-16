@@ -12,7 +12,7 @@ import { Notebook } from '../ui/notebook';
 import { CharacterPreview } from '../ui/preview';
 import { askNumbers, el, Screens } from '../ui/screens';
 import { ChunkManager } from '../world/chunks';
-import { makeFirstPersonArm } from '../world/characters';
+import { makeCharacter, makeFirstPersonArm } from '../world/characters';
 import { SKY_FOREST, SKY_OPEN } from '../world/colors';
 import { buildLandmarks } from '../world/landmarks3d';
 import { createMission, fmtCoord, LEVELS, type Action, type Ctx, type Mission } from './missions';
@@ -22,11 +22,12 @@ import type { P, Sites } from './sites';
 import { ALL_TOOLS, loadProgress, saveProgress, TOOLS, type Reading, type ToolId } from './state';
 import { Team } from './team';
 
-// View distances in blocks (1 block = 2.5 m). Open terrain: about 1 km, so landmarks across the map
-// can be sighted. Where the haze starts depends on the mission's weather (Mission.haze): clear days in
-// the early levels so the terrain can be read, hazier days later, as in the field. The far limit stays
-// the same, so the same landmarks can be sighted in any weather. Forest: heavy fog under the canopy.
-const CLEAR_NEAR = 260, HAZY_NEAR = 90, OPEN_FAR = 420;
+// View distances in blocks (1 block = 2.5 m). Open terrain: 1.4 km, nearly the whole 1.5 km sheet,
+// so landmarks across the map can be sighted. Where the haze starts depends on the mission's weather
+// (Mission.haze): clear days in the early levels so the terrain can be read, a light haze later, as in
+// the field. The far limit stays the same, so the same landmarks can be sighted in any weather.
+// Forest: heavy fog under the canopy.
+const CLEAR_NEAR = 380, HAZY_NEAR = 230, OPEN_FAR = 560;
 const FOREST_NEAR = 3, FOREST_FAR = 30;
 const LOAD_RADIUS = OPEN_FAR + 16;
 
@@ -56,6 +57,9 @@ export class Game {
   private screens: Screens;
   private progress = loadProgress();
   private arm = makeFirstPersonArm();
+  /** The player's own body, seen in the third-person view. */
+  private body = makeCharacter('compasman');
+  private thirdPerson = false;
   private heading = new HeadingStrip($<HTMLCanvasElement>('heading'));
 
   private mode: 'menu' | 'field' = 'menu';
@@ -87,6 +91,8 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, OPEN_FAR + 20);
     this.camera.add(this.arm);
     this.scene.add(this.camera);
+    this.body.group.visible = false;
+    this.scene.add(this.body.group);
 
     this.chunks = new ChunkManager(w);
     this.scene.add(this.chunks.root);
@@ -335,14 +341,15 @@ export class Game {
     for (let tries = 1; tries <= 3; tries++) {
       const p = await new Promise<P | null>((resolve) => {
         this.openMap(true);
-        this.map.requestMark(`Tandai ${d.label}: ${fmtCoord(d.p)} (lintang, bujur), lalu Kirim`, (x, z) => resolve([x, z]));
+        this.map.requestMark(`Tandai ${d.label}: ${fmtCoord(d.p)}. Ukur dari garis karvak (penggaris), lalu Tanda → Kirim`, (x, z) => resolve([x, z]));
         this.pendingMark = resolve;
       });
       this.pendingMark = null;
       if (!p) { tries--; continue; }
       const err = Math.hypot(p[0] - d.p[0], p[1] - d.p[1]) * 2.5;
       m.destinationTries = tries;
-      if (err <= 50) {
+      // 100 m (4 mm on the sheet): a fingertip on a phone is not a sharp pencil.
+      if (err <= 100) {
         this.map.marks.push({ x: p[0], z: p[1], label: d.label, pen: !this.tools.has('pensil') });
         this.toast('Tujuan ditandai', [`Meleset ${Math.round(err)} m dari koordinat. Bagus.`]);
         break;
@@ -402,7 +409,12 @@ export class Game {
     this.team.update(dt, forward, player, now / 1000);
     player.update(dt, input);
     player.applyCamera(camera);
-    this.arm.visible = !this.compass.raised;
+    // Third person: the camera sits behind and a little right of the head. Sighting is always
+    // through the compass, so raising it returns to the eye.
+    const third = this.thirdPerson && !this.compass.raised;
+    this.body.group.visible = third;
+    this.arm.visible = !third && !this.compass.raised;
+    if (third) this.placeThirdPerson(dt);
     const facing = magneticOf(azimuthOfYaw(player.yaw));
     this.compass.update(dt, facing);
     const headingEl = $('heading');
@@ -454,6 +466,44 @@ export class Game {
     this.adaptResolution(dt);
 
     this.endIfDone();
+  }
+
+  private placeThirdPerson(dt: number) {
+    const { player, camera, body } = this;
+    body.group.position.set(player.x, player.viewFootY, player.z);
+    body.group.rotation.y = player.yaw;
+    body.animate(dt, player.moved / Math.max(dt, 1e-3));
+    // Behind and a little above and right of the head. The view keeps the player's yaw and pitch, so
+    // aiming feels the same in both views; looking down swings the camera up over the head (looking up
+    // does not swing it into the ground).
+    const eye = camera.position;
+    const p = Math.max(-1.2, Math.min(0.1, player.pitch));
+    const back: [number, number, number] = [Math.sin(player.yaw) * Math.cos(p), -Math.sin(p), Math.cos(player.yaw) * Math.cos(p)];
+    const right: [number, number] = [Math.cos(player.yaw), -Math.sin(player.yaw)];
+    const D = 1.9, UP = 0.3, SIDE = 0.3; // blocks (about 5 m back)
+    const at = (t: number): [number, number, number] => [
+      eye.x + (back[0] * D + right[0] * SIDE) * t,
+      eye.y + (back[1] * D + UP) * t,
+      eye.z + (back[2] * D + right[1] * SIDE) * t,
+    ];
+    // Pull the camera in where a slope or a tree would come between it and the player.
+    let t = 0;
+    for (let k = 1; k <= 12; k++) {
+      const [x, y, z] = at(k / 12);
+      const xi = Math.floor(x), zi = Math.floor(z);
+      if (xi < 0 || zi < 0 || xi >= this.w.size || zi >= this.w.size) break;
+      const i = zi * this.w.size + xi;
+      if (y < this.w.height[i] + 0.3 || this.w.solid[i]) break;
+      t = k / 12;
+    }
+    eye.set(...at(t));
+  }
+
+  private toggleView() {
+    this.thirdPerson = !this.thirdPerson;
+    $('btn-view').classList.toggle('on', this.thirdPerson);
+    this.toast(this.thirdPerson ? 'Sudut pandang orang ketiga' : 'Sudut pandang orang pertama',
+      [this.thirdPerson ? 'Kompas tetap dibidik dari mata.' : '']);
   }
 
   private endIfDone() {
@@ -511,6 +561,7 @@ export class Game {
     $('map-close').addEventListener('click', () => this.openMap(false));
     $('map-north').addEventListener('click', () => this.map.northUp());
     $('map-legend').addEventListener('click', () => this.map.toggleLegend());
+    press('btn-view', () => this.toggleView());
     press('btn-notebook', () => {
       if (this.notebook.isOpen()) this.notebook.close();
       else { this.input.reset(); this.notebook.open(); }
@@ -532,6 +583,7 @@ export class Game {
       if (e.target instanceof HTMLInputElement || this.mode !== 'field') return;
       if (e.code === 'KeyM' && this.tools.has('peta')) this.openMap(!this.mapOpen);
       if (e.code === 'KeyN') $('btn-notebook').dispatchEvent(new PointerEvent('pointerdown'));
+      if (e.code === 'KeyV') this.toggleView();
     });
 
     // compass: hold to raise, release to record
@@ -570,7 +622,7 @@ export class Game {
       this.map.setNotes(inField ? this.notebook.readings
         .map((r, i) => ({ r, i }))
         .filter(({ r }) => r.pairedWith >= 0 && r.backTyped !== null)
-        .map(({ r, i }) => `#${i + 1} ${this.notebook.symbolName(r.pairedWith)}: az ${pad(r.azimuth)} · balik ${pad(r.backTyped!)}`) : []);
+        .map(({ r, i }) => `#${i + 1} ${this.notebook.symbolName(r.pairedWith)}: az ${pad(r.azimuth)} · back az ${pad(r.backTyped!)}`) : []);
       this.map.show();
       this.mission?.onMapOpen();
     } else {

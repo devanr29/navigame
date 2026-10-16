@@ -66,7 +66,7 @@ export interface LevelInfo {
 export const LEVELS: LevelInfo[] = [
   { n: 1, title: 'Base camp', focus: 'Persiapan', mechanic: 'Mengemas alat, koordinat, skala, kontur, karvak', pass: 'Semua soal peta benar' },
   { n: 2, title: 'Orientasi', focus: 'Utarakan peta, orientasi medan', mechanic: 'Memutar peta, memasangkan titik ekstrem', pass: 'Peta terutarakan; 3 titik ekstrem dipasangkan benar' },
-  { n: 3, title: 'Resection', focus: 'Mencari posisi sendiri', mechanic: 'Bidikan kompas, azimut balik, menggaris', pass: 'Galat posisi di bawah 100 m' },
+  { n: 3, title: 'Resection', focus: 'Mencari posisi sendiri', mechanic: 'Bidikan kompas, back azimuth, menggaris', pass: 'Galat posisi di bawah 100 m' },
   { n: 4, title: 'Intersection', focus: 'Mencari letak objek', mechanic: 'Azimut dari dua titik diketahui', pass: 'Objek ditemukan dalam 150 m' },
   { n: 5, title: 'Rute navigasi terbuka', focus: 'Jalur dan persimpangan', mechanic: 'Rencana jalur, cek di setiap persimpangan', pass: 'Sampai tujuan; semua persimpangan dicek' },
   { n: 6, title: 'Deklinasi', focus: 'Utara magnetis vs utara peta', mechanic: 'Koreksi deklinasi', pass: 'Rute terkoreksi sampai sasaran (≤30 m)' },
@@ -271,14 +271,14 @@ class Resection extends Mission {
     this.briefing = [
       'Kamu tidak tahu sedang berada di mana. Tentukan posisimu dengan resection: dari dua titik ekstrem yang terlihat dan sudah kamu kenali di peta.',
       '1. Utarakan peta: lihat derajat kompas di atas layar, buka peta, putar peta dengan dua jari sampai utaranya searah utara sebenarnya.',
-      '2. Bidik titik ekstrem pertama dengan kompas. Di Catatan, pasangkan bidikan dengan simbolnya di peta dan tulis azimut baliknya. Di peta, letakkan busur di simbol itu dan gariskan azimut baliknya.',
+      '2. Bidik titik ekstrem pertama dengan kompas. Di Catatan, pasangkan bidikan dengan simbolnya di peta dan tulis back azimuth-nya. Di peta, letakkan busur di simbol itu dan gariskan back azimuth-nya.',
       '3. Ulangi langkah 2 untuk titik ekstrem kedua.',
       '4. Tandai posisimu di peta, yaitu titik potong kedua garis, lalu kirim.',
     ];
     this.objectives = [
       { text: 'Utarakan peta', done: false },
-      { text: 'Titik ekstrem 1: bidik, pasangkan, azimut balik, gariskan', done: false },
-      { text: 'Titik ekstrem 2: bidik, pasangkan, azimut balik, gariskan', done: false },
+      { text: 'Titik ekstrem 1: bidik, pasangkan, back azimuth, gariskan', done: false },
+      { text: 'Titik ekstrem 2: bidik, pasangkan, back azimuth, gariskan', done: false },
       { text: 'Tandai posisimu di peta (perpotongan garis)', done: false },
     ];
   }
@@ -301,7 +301,7 @@ class Resection extends Mission {
       const paired = id !== undefined;
       const back = paired && rs.some((r) => r.pairedWith === id && r.backTyped !== null && Math.abs(r.backTyped - backAzimuth(r.azimuth)) < 0.5);
       const line = !!l && this.linesFrom([l.x, l.z]).length > 0;
-      o[1 + k].text = `Titik ekstrem ${k + 1}${l ? ` (${l.name})` : ''}: bidik ${tick(aimed)} pasang ${tick(paired)} balik ${tick(back)} garis ${tick(line)}`;
+      o[1 + k].text = `Titik ekstrem ${k + 1}${l ? ` (${l.name})` : ''}: bidik ${tick(aimed)} pasang ${tick(paired)} back az ${tick(back)} garis ${tick(line)}`;
       o[1 + k].done = aimed && paired && back && line;
     }
   }
@@ -320,7 +320,7 @@ class Resection extends Mission {
     if (!this.objectives[0].done) this.lessons.push('Peta belum diutarakan. Utarakan peta dulu, supaya arah di peta sama dengan arah di medan dan titik ekstrem mudah dikenali.');
     const p = this.pairs();
     if (p.wrong) this.lessons.push('Ada bidikan yang dipasangkan dengan simbol yang salah, sehingga garisnya berangkat dari tempat yang salah.');
-    this.lessons.push('Resection = mencari posisi diri sendiri, memakai azimut BALIK dari titik ekstrem yang diketahui.');
+    this.lessons.push('Resection = mencari posisi diri sendiri, memakai BACK AZIMUTH dari titik ekstrem yang diketahui.');
     const passed = errM <= 100;
     this.finish(passed, 60 * clamp01(1 - errM / 150) + this.azScore(25) + this.timeScore(15), [
       ['Galat posisi', `${errM} m`],
@@ -358,7 +358,7 @@ class Intersection extends Mission {
     this.briefing = [
       'Ada asap kebakaran terlihat dari lapangan. Tentukan letaknya dengan intersection.',
       `Pos A (bendera oranye) di ${fmtCoord(this.A)}. Pos B (bendera ungu) di ${fmtCoord(this.B)}. Keduanya tergambar di peta.`,
-      'Dari Pos A bidik asap dan gariskan AZIMUT itu (bukan azimut balik) dari Pos A. Berjalan ke Pos B dan ulangi. Titik potongnya adalah letak asap.',
+      'Dari Pos A bidik asap dan gariskan AZIMUT itu (bukan back azimuth) dari Pos A. Berjalan ke Pos B dan ulangi. Titik potongnya adalah letak asap.',
     ];
     this.objectives = [
       { text: 'Bidik asap dari Pos A', done: false },
@@ -398,11 +398,11 @@ class Intersection extends Mission {
     for (const [post, az] of [[this.A, this.readings.a], [this.B, this.readings.b]] as [P, number | null][]) {
       if (az === null) continue;
       if (this.linesFrom(post).some((l) => Math.abs(angleDiff(l.az, backAzimuth(az))) < 3)) {
-        this.lessons.push('Ada garis yang memakai azimut balik. Pada intersection, garis ditarik dari titik pengamatan memakai AZIMUT ke objek.');
+        this.lessons.push('Ada garis yang memakai back azimuth. Pada intersection, garis ditarik dari titik pengamatan memakai AZIMUT ke objek.');
         break;
       }
     }
-    this.lessons.push('Resection = mencari diri sendiri (azimut balik dari titik ekstrem). Intersection = mencari objek (azimut dari dua titik diketahui).');
+    this.lessons.push('Resection = mencari diri sendiri (back azimuth dari titik ekstrem). Intersection = mencari objek (azimut dari dua titik diketahui).');
     this.finish(errM <= 150, 60 * clamp01(1 - errM / 220) + this.azScore(25) + this.timeScore(15), [
       ['Galat letak asap', `${errM} m`],
       ['Batas lulus', '150 m'],

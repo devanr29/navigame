@@ -167,6 +167,20 @@ export function makeCharacter(role: Role): Character {
   const head = part(0.28, 0.3, 0.28, skin, 0, 1.55, 0);
   const hair = part(0.3, 0.09, 0.3, colorMat(HAIR), 0, 1.68, 0.01);
 
+  // Face on the front (−z) of the head: eyes, brows, nose, mouth; hair at the back and sides.
+  const face = new THREE.Group();
+  const hairM = colorMat(HAIR);
+  for (const sx of [-1, 1]) {
+    face.add(part(0.075, 0.05, 0.01, colorMat('#f4f1e8'), sx * 0.065, 1.575, -0.145)); // eye white
+    face.add(part(0.035, 0.05, 0.012, colorMat('#2b2a3a'), sx * 0.047, 1.575, -0.146)); // pupil
+    face.add(part(0.085, 0.022, 0.012, hairM, sx * 0.065, 1.618, -0.146)); // brow
+    face.add(part(0.02, 0.13, 0.2, hairM, sx * 0.145, 1.6, 0.04)); // side hair
+  }
+  face.add(part(0.05, 0.05, 0.025, colorMat('#b57d58'), 0, 1.53, -0.152)); // nose
+  face.add(part(0.11, 0.026, 0.01, colorMat('#7a3b2e'), 0, 1.475, -0.145)); // mouth
+  face.add(part(0.3, 0.045, 0.02, hairM, 0, 1.655, -0.148)); // fringe
+  face.add(part(0.3, 0.2, 0.03, hairM, 0, 1.58, 0.152)); // back of the head
+
   // arms (pivot at the shoulder), flannel sleeves with a visible cuff and a hand
   const armL = new THREE.Group(), armR = new THREE.Group();
   armL.position.set(-0.29 * U, 1.33 * U, 0);
@@ -210,7 +224,7 @@ export function makeCharacter(role: Role): Character {
   }
   armR.add(item);
 
-  group.add(legL, legR, torso, head, hair, armL, armR, scarfG);
+  group.add(legL, legR, torso, head, hair, face, armL, armR, scarfG);
   // The body faces −z, so a positive x rotation swings the hanging arm forward (a negative one would
   // swing it backward, over the scarf's back point).
   if (role === 'compasman') armR.rotation.x = 1.2; // compass raised toward the eye

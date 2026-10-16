@@ -45,8 +45,10 @@ export class CharacterPreview {
         this.camera.aspect = r.width / r.height;
         this.camera.updateProjectionMatrix();
       }
-      // Turn slowly, lingering on the back so the scarf and badge are seen.
-      this.model.group.rotation.y = Math.sin(this.t * 0.6) * 1.3; // 0 = back to the camera
+      // Turn all the way round (face and scarf front, then the badge on the back), slowing down at
+      // the back so the badge is seen. 0 = back to the camera.
+      const a = this.t * 0.55;
+      this.model.group.rotation.y = a - 0.45 * Math.sin(a);
       this.model.animate(dt, 0.3);
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);

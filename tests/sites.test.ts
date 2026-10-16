@@ -35,7 +35,7 @@ describe.each(['jamadagni', 'navter', '42'])('mission sites for seed %s', (seed)
   it('the declination leg is walkable: no step over one block, modest climb', () => {
     const { start, target } = s.declination;
     const L = Math.hypot(target[0] - start[0], target[1] - start[1]);
-    expect(L).toBeGreaterThan(150);
+    expect(L).toBeGreaterThan(125);
     let prev = w.height[at(start)], lo = prev, hi = prev;
     for (let d = 1; d < L; d++) {
       const p: [number, number] = [start[0] + ((target[0] - start[0]) * d) / L, start[1] + ((target[1] - start[1]) * d) / L];

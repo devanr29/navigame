@@ -233,10 +233,13 @@ const levels = {
     // walk the locked bearing: face it and hold forward until near the target (or 160 s)
     await page.evaluate((m) => { T.face((m.mag + 6) % 360); T.g.input.forceForward = true; }, mag);
     const t0 = Date.now();
-    let d = 1e9, prev = null, stuck = 0;
+    let d = 1e9, prev = null, stuck = 0, minD = 1e9;
     while (Date.now() - t0 < 160000) {
       d = await page.evaluate(() => { const t = T.g.sites.declination.target; return Math.hypot(T.g.player.x - t[0], T.g.player.z - t[1]); });
       if (d < 3) break;
+      // walking briskly, the check can step past the post: stop once the distance grows again near it
+      if (minD < 10 && d > minD + 1) break;
+      minD = Math.min(minD, d);
       // like a player: keep the bearing, jump up steps, sidestep what cannot be climbed
       const p = await page.evaluate(() => T.pos());
       if (prev && Math.hypot(p[0] - prev[0], p[1] - prev[1]) < 0.3) {
