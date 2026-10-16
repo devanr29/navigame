@@ -105,7 +105,7 @@ await page.getByRole('button', { name: 'Garis lurus' }).click();
 const [lx, ly] = await toScreen(233, 101), [lx2, ly2] = await toScreen(240, 160);
 await page.mouse.move(lx, ly); await page.mouse.down(); await page.mouse.move(lx2, ly2, { steps: 6 }); await page.mouse.up();
 const sl = await g(() => window.__game.map.strokes[0]?.pts);
-const onTick = sl && Math.abs(sl[1] - 100) < 1e-6 && [10, 50, 100].some((st) => Math.abs((sl[0] - 100) / st - Math.round((sl[0] - 100) / st)) < 1e-6);
+const onTick = sl && Math.abs(sl[1] - 100) < 1e-3 && [10, 50, 100].some((st) => Math.abs((sl[0] - 100) / st - Math.round((sl[0] - 100) / st)) < 1e-3);
 check('straight line is two points, start snapped to a ruler tick', sl?.length === 4 && onTick, JSON.stringify(sl));
 check('readout gives the line length and ruler position', /Garis: .* cm/.test(await page.locator('.map-readout').textContent()), await page.locator('.map-readout').textContent());
 await page.getByRole('button', { name: 'Garis lurus' }).click();

@@ -231,6 +231,9 @@ html, body {
 }
 .prot-bar { position: absolute; right: calc(10px + var(--safe-r)); bottom: 10px; display: flex; gap: 5px; align-items: center; }
 .prot-bar .btn:disabled { opacity: 0.45; }
+.prot-bar.stack { flex-direction: column; align-items: flex-end; }
+.prot-row { display: flex; gap: 5px; align-items: center; }
+.map-readout.up { bottom: 102px; }
 .prot-input { width: 72px; font-size: 16px; padding: 7px; border-radius: 8px; border: 2px solid var(--accent-2); }
 /* Requests sit in the bottom-left dock, small, so the map stays clear. */
 .map-banner {

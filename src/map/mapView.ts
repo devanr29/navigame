@@ -189,7 +189,13 @@ export class MapView {
     });
     const drawBtn = button('Gariskan', 'btn small');
     drawBtn.addEventListener('click', () => this.drawProtractorLine());
-    this.protBar.append(minus, this.protInput, plus, drawBtn);
+    const liftBtn = button('Angkat', 'btn ghost small');
+    liftBtn.addEventListener('click', () => {
+      this.protractor = null;
+      this.updateReadout();
+      this.dirty = true;
+    });
+    this.protBar.append(liftBtn, minus, this.protInput, plus, drawBtn);
 
     this.banner = div('map-banner');
     this.banner.hidden = true;
@@ -231,7 +237,20 @@ export class MapView {
     this.lineStartBtn.addEventListener('click', () => this.setLineStart());
     this.lineEndBtn = button('Akhiri garis', 'btn small');
     this.lineEndBtn.addEventListener('click', () => this.setLineEnd());
-    this.pencilBar.append(this.straightBtn, this.lineStartBtn, this.lineEndBtn);
+    // Karvak lines: a straight line through the point under the crosshair, edge to edge of its karvak,
+    // east–west or north–south. Measured with the ruler from the karvak edges, they give the coordinate.
+    const hBtn = button('↔ Karvak', 'btn small');
+    hBtn.title = 'Garis barat–timur sampai batas karvak';
+    hBtn.addEventListener('click', () => this.drawKarvakLine('h'));
+    const vBtn = button('↕ Karvak', 'btn small');
+    vBtn.title = 'Garis utara–selatan sampai batas karvak';
+    vBtn.addEventListener('click', () => this.drawKarvakLine('v'));
+    const karvakRow = div('prot-row');
+    karvakRow.append(hBtn, vBtn);
+    const lineRow = div('prot-row');
+    lineRow.append(this.straightBtn, this.lineStartBtn, this.lineEndBtn);
+    this.pencilBar.classList.add('stack');
+    this.pencilBar.append(karvakRow, lineRow);
 
     // Field notebook entries that are ready to draw (paired, back azimuth written).
     this.notesEl = div('map-notes');
@@ -465,6 +484,32 @@ export class MapView {
     this.dirty = true;
   }
 
+  /** Grid-line edges of the karvak holding a sheet point: [west x, east x, north z, south z]. */
+  private karvakBounds(x: number, z: number): [number, number, number, number] {
+    const N = this.w.size;
+    const xs = [0, N, ...this.lonLines.map(xAtLonSec)];
+    const zs = [0, N, ...this.latLines.map(zAtLatSec)];
+    const lo = (vs: number[], v: number) => Math.max(...vs.filter((u) => u <= v));
+    const hi = (vs: number[], v: number) => Math.min(...vs.filter((u) => u > v));
+    return [lo(xs, x), hi(xs, x), lo(zs, z), hi(zs, z)];
+  }
+
+  /** Straight line through the point under the crosshair, across its whole karvak ('h' west–east, 'v' north–south). */
+  private drawKarvakLine(dir: 'h' | 'v') {
+    const wt = this.writeTool();
+    const N = this.w.size;
+    if (!wt) return;
+    let [x, z] = this.snapLine(this.cx, this.cz);
+    this.lineOnRuler = null;
+    if (x < 0 || z < 0 || x > N || z > N) return;
+    x = Math.min(x, N - 1e-6);
+    z = Math.min(z, N - 1e-6);
+    const [x0, x1, z0, z1] = this.karvakBounds(x, z);
+    this.strokes.push({ pts: dir === 'h' ? [x0, z, x1, z] : [x, z0, x, z1], pen: wt === 'pena' });
+    this.readout.textContent = `Garis ${dir === 'h' ? 'barat–timur' : 'utara–selatan'} di karvak ${this.karvakAt(x, z)}`;
+    this.dirty = true;
+  }
+
   private dropStroke(st: MapStroke) {
     const i = this.strokes.indexOf(st);
     if (i >= 0) this.strokes.splice(i, 1);
@@ -510,7 +555,8 @@ export class MapView {
     this.lineStartBtn.hidden = !this.straight;
     this.lineEndBtn.hidden = !this.straight;
     this.lineEndBtn.disabled = !this.lineLive;
-    this.readout.hidden = req || !(this.tool === 'busur' || this.tool === 'penggaris' || this.straightPencil());
+    this.readout.hidden = req || !(this.tool === 'busur' || this.tool === 'penggaris' || this.tool === 'pensil');
+    this.readout.classList.toggle('up', this.tool === 'pensil');
   }
 
   private straightPencil() { return this.tool === 'pensil' && this.straight; }
@@ -601,6 +647,8 @@ export class MapView {
         const on = this.lineOnRuler ? ` · ujung di ${fmtCm1(this.lineOnRuler.cm)} cm penggaris ${this.lineOnRuler.n}` : '';
         this.readout.textContent = `Garis: ${fmtCm(blocks)} cm${on}`;
       }
+    } else if (this.tool === 'pensil') {
+      this.readout.textContent = 'Pensil · ↔/↕ Karvak: garis lurus di tanda + sampai batas karvak';
     } else if (this.tool === 'busur') {
       if (!this.protractor) this.readout.textContent = 'Ketuk titik untuk meletakkan busur';
       else this.readout.textContent = `Busur: ${fmtNum(Math.round(this.protractor.az * 2) / 2)}° dari utara peta`;
@@ -820,7 +868,7 @@ export class MapView {
     if (this.devMarker) this.drawDevMarker(this.devMarker, m);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    if ((this.tool === 'penggaris' || this.straightPencil()) && this.request?.kind !== 'symbol') this.drawCrosshair(W / 2, H / 2);
+    if ((this.tool === 'penggaris' || this.tool === 'pensil') && this.request?.kind !== 'symbol') this.drawCrosshair(W / 2, H / 2);
     if (this.loupe) this.drawLoupe(this.loupe.x, this.loupe.y, W);
     if (this.showLegend) this.drawLegend(W, H);
   }
@@ -973,17 +1021,18 @@ export class MapView {
 
   private drawToolOverlays(m: number) {
     const ctx = this.ctx;
-    // Rulers stay visible while drawing straight lines, so the line can be laid on their ticks.
-    if (this.tool === 'penggaris' || this.straightPencil()) {
-      this.rulers.forEach((r, i) => this.drawRuler(r, i + 1, m, r === this.ruler && this.tool === 'penggaris'));
-    }
-    if (this.protractor && this.tool === 'busur') {
+    // Placed rulers and the protractor stay on the sheet whatever tool is in hand, like on a real desk,
+    // so they can be used together (e.g. a pencil line laid on a ruler's ticks next to the protractor).
+    this.rulers.forEach((r, i) => this.drawRuler(r, i + 1, m, r === this.ruler && this.tool === 'penggaris'));
+    if (this.protractor) {
       const p = this.protractor;
+      const active = this.tool === 'busur';
       ctx.save();
       ctx.translate(p.x, p.z);
       ctx.scale(m, m);
       const R = 74;
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.globalAlpha = active ? 1 : 0.6;
+      ctx.fillStyle = active ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.35)';
       ctx.strokeStyle = C.tool;
       ctx.lineWidth = 1.2;
       ctx.beginPath();
@@ -1041,6 +1090,7 @@ export class MapView {
         ctx.stroke();
         ctx.setLineDash([]);
       }
+      if (r.dot === false) continue;
       ctx.beginPath();
       ctx.arc(r.x, r.z, 6 * m, 0, Math.PI * 2);
       ctx.stroke();
@@ -1090,7 +1140,6 @@ export class MapView {
     ctx.arc(0, 0, 1.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-      if (r.dot === false) continue;
     ctx.font = '700 10px system-ui, sans-serif';
     this.text(s.x + 8 * m, s.z, s.label, C.ink, 0, m, true, 'left');
   }
@@ -1404,7 +1453,22 @@ export class MapView {
       return;
     }
     this.gesture = this.tool === 'geser' ? 'pan' : 'tool';
-    if (this.tool === 'penggaris') {
+    if (this.tool === 'geser') {
+      // With Geser in hand, the tools lying on the sheet can be slid by their handles: a ruler end or
+      // the protractor centre. Anywhere else pans the map.
+      const hit = this.rulerEndAt(x, z);
+      const p = this.protractor;
+      if (hit) {
+        this.ruler = hit.r;
+        this.rulerEnd = hit.end;
+        this.rulerLive = false;
+        this.gesture = 'ruler-end';
+        this.setLoupe(e);
+      } else if (p && Math.hypot(p.x - x, p.z - z) * this.zoom < 26) {
+        this.gesture = 'busur-move';
+        this.setLoupe(e);
+      }
+    } else if (this.tool === 'penggaris') {
       // Touch: drag an end of the ruler, or pan (the ends are set with the buttons). Mouse: drag to measure.
       const hit = this.rulerEndAt(x, z);
       if (hit) {
@@ -1495,7 +1559,12 @@ export class MapView {
       if (this.loupe) this.setLoupe(e);
       this.updateReadout();
       this.dirty = true;
-    } else if (this.gesture === 'tool' || this.gesture === 'busur-move') {
+    } else if (this.gesture === 'busur-move' && this.protractor) {
+      [this.protractor.x, this.protractor.z] = this.snap(...this.screenToSheet(e.clientX, e.clientY));
+      this.setLoupe(e);
+      this.updateReadout();
+      this.dirty = true;
+    } else if (this.gesture === 'tool') {
       const [x, z] = this.screenToSheet(e.clientX, e.clientY);
       if (this.request?.kind === 'symbol') {
         if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 10) this.gesture = 'pan';
@@ -1511,12 +1580,7 @@ export class MapView {
       } else if (this.tool === 'hapus') {
         this.eraseAt(x, z);
       } else if (this.tool === 'busur' && this.protractor) {
-        if (this.gesture === 'busur-move') this.setLoupe(e);
-        if (this.gesture === 'busur-move') {
-          const [sx, sz] = this.snap(x, z);
-          this.protractor.x = sx;
-          this.protractor.z = sz;
-        } else this.aimProtractor(x, z);
+        this.aimProtractor(x, z);
         this.updateReadout();
       }
       this.dirty = true;
