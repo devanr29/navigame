@@ -31,6 +31,9 @@ const C = {
 
 interface Label { x: number; z: number; a: number; text: string }
 
+/** A ruler laid on the sheet from end a to end b (sheet coordinates). */
+interface Ruler { ax: number; az: number; bx: number; bz: number }
+
 /** 'tanda' only exists while a mission asks for a point (destination, own position). */
 export type MapTool = 'geser' | 'tanda' | 'pensil' | 'hapus' | 'penggaris' | 'busur' | 'titik';
 
@@ -77,11 +80,20 @@ export class MapView {
   strokes: MapStroke[] = [];
   lines: MapLine[] = [];
   marks: MapMark[] = [];
-  private ruler: { ax: number; az: number; bx: number; bz: number } | null = null;
+  /** Rulers laid on the sheet. Several can stay down at once, e.g. one per coordinate to divide. */
+  private rulers: Ruler[] = [];
+  /** The ruler being placed or last touched: the readout and the buttons act on it. */
+  private ruler: Ruler | null = null;
   /** True after "Titik awal" until "Titik akhir": the ruler's end follows the centre crosshair. */
   private rulerLive = false;
   /** Which ruler end a finger is dragging. */
   private rulerEnd: 'a' | 'b' = 'b';
+  /** Pencil draws straight lines (press to start, release to end) that snap to ruler ticks. */
+  private straight = false;
+  /** Straight pencil line whose end follows the centre crosshair (phone buttons). */
+  private lineLive: MapStroke | null = null;
+  /** Where the end of the straight line being drawn sits on a ruler, for the readout. */
+  private lineOnRuler: { n: number; cm: number } | null = null;
   private protractor: { x: number; z: number; az: number } | null = null;
   private drawing: MapStroke | null = null;
   private gesture: 'none' | 'tool' | 'pinch' | 'pan' | 'busur-move' | 'ruler-end' | 'mark-move' = 'none';
@@ -115,6 +127,11 @@ export class MapView {
   private lockBtn: HTMLButtonElement;
   private rulerBar: HTMLElement;
   private rulerEndBtn: HTMLButtonElement;
+  private rulerDelBtn: HTMLButtonElement;
+  private pencilBar: HTMLElement;
+  private straightBtn: HTMLButtonElement;
+  private lineStartBtn: HTMLButtonElement;
+  private lineEndBtn: HTMLButtonElement;
   private notesEl: HTMLElement;
   private notesOpen = true;
   private notes: string[] = [];
@@ -193,7 +210,27 @@ export class MapView {
     startBtn.addEventListener('click', () => this.setRulerStart());
     this.rulerEndBtn = button('Titik akhir', 'btn small');
     this.rulerEndBtn.addEventListener('click', () => this.setRulerEnd());
-    this.rulerBar.append(startBtn, this.rulerEndBtn);
+    this.rulerDelBtn = button('Buang', 'btn ghost small');
+    this.rulerDelBtn.addEventListener('click', () => this.removeRuler());
+    this.rulerBar.append(this.rulerDelBtn, startBtn, this.rulerEndBtn);
+
+    // Pencil: freehand or straight lines. Straight lines snap to ruler ticks, so a coordinate can be
+    // divided with a ruler and the line drawn through the exact mark.
+    this.pencilBar = div('prot-bar');
+    this.pencilBar.hidden = true;
+    this.straightBtn = button('Garis lurus', 'btn ghost small');
+    this.straightBtn.addEventListener('click', () => {
+      this.straight = !this.straight;
+      this.lineLive = null;
+      this.syncChrome();
+      this.updateReadout();
+      this.dirty = true;
+    });
+    this.lineStartBtn = button('Mulai garis', 'btn small');
+    this.lineStartBtn.addEventListener('click', () => this.setLineStart());
+    this.lineEndBtn = button('Akhiri garis', 'btn small');
+    this.lineEndBtn.addEventListener('click', () => this.setLineEnd());
+    this.pencilBar.append(this.straightBtn, this.lineStartBtn, this.lineEndBtn);
 
     // Field notebook entries that are ready to draw (paired, back azimuth written).
     this.notesEl = div('map-notes');
@@ -202,7 +239,7 @@ export class MapView {
     // Bottom-left dock: a pending request above the tool palette, so neither covers the other.
     const dock = div('map-dock');
     dock.append(this.banner, this.toolbar);
-    root.append(dock, this.readout, this.protBar, this.rulerBar, this.orientEl, this.notesEl);
+    root.append(dock, this.readout, this.protBar, this.rulerBar, this.pencilBar, this.orientEl, this.notesEl);
 
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
@@ -297,7 +334,9 @@ export class MapView {
     this.strokes = [];
     this.lines = [];
     this.marks = [];
+    this.rulers = [];
     this.ruler = null;
+    this.lineLive = null;
     this.protractor = null;
     this.symbols = [];
     this.reveals = [];
@@ -368,9 +407,12 @@ export class MapView {
     return this.snap(this.cx, this.cz);
   }
 
+  /** "Titik awal" lays down a new ruler; the ones already down stay where they are. */
   private setRulerStart() {
     const [x, z] = this.centrePoint();
+    if (this.rulerLive && this.ruler) this.rulers.splice(this.rulers.indexOf(this.ruler), 1);
     this.ruler = { ax: x, az: z, bx: x, bz: z };
+    this.rulers.push(this.ruler);
     this.rulerLive = true;
     this.updateReadout();
     this.syncChrome();
@@ -388,6 +430,71 @@ export class MapView {
     this.dirty = true;
   }
 
+  /** Picks up the active ruler; the most recent remaining one becomes active. */
+  private removeRuler() {
+    if (!this.ruler) return;
+    this.rulers.splice(this.rulers.indexOf(this.ruler), 1);
+    this.ruler = this.rulers[this.rulers.length - 1] ?? null;
+    this.rulerLive = false;
+    this.updateReadout();
+    this.syncChrome();
+    this.dirty = true;
+  }
+
+  private setLineStart() {
+    const wt = this.writeTool();
+    if (!wt) return;
+    if (this.lineLive) this.dropStroke(this.lineLive);
+    const [x, z] = this.snapLine(this.cx, this.cz);
+    this.lineLive = { pts: [x, z, x, z], pen: wt === 'pena' };
+    this.strokes.push(this.lineLive);
+    this.updateReadout();
+    this.syncChrome();
+    this.dirty = true;
+  }
+
+  private setLineEnd() {
+    const l = this.lineLive;
+    if (!l) return;
+    [l.pts[2], l.pts[3]] = this.snapLine(this.cx, this.cz);
+    if (l.pts[0] === l.pts[2] && l.pts[1] === l.pts[3]) this.dropStroke(l);
+    this.lineLive = null;
+    this.updateReadout();
+    this.syncChrome();
+    this.dirty = true;
+  }
+
+  private dropStroke(st: MapStroke) {
+    const i = this.strokes.indexOf(st);
+    if (i >= 0) this.strokes.splice(i, 1);
+  }
+
+  /**
+   * Snap for straight pencil lines: a symbol or mark first, else the nearest tick on a ruler edge
+   * (millimetres when zoomed in enough to tell them apart), else the point itself.
+   */
+  private snapLine(x: number, z: number): [number, number] {
+    this.lineOnRuler = null;
+    const s = this.snap(x, z);
+    if (s[0] !== x || s[1] !== z) return s;
+    let best: [number, number] = [x, z];
+    let bd = 14 / this.zoom;
+    this.rulers.forEach((r, i) => {
+      const L = Math.hypot(r.bx - r.ax, r.bz - r.az);
+      if (L < 1e-6) return;
+      const ux = (r.bx - r.ax) / L, uz = (r.bz - r.az) / L;
+      const t = (x - r.ax) * ux + (z - r.az) * uz;
+      const d = Math.abs((x - r.ax) * -uz + (z - r.az) * ux);
+      if (d >= bd || t < -bd || t > L + bd) return;
+      const step = tickStep(this.zoom);
+      const ts = Math.max(0, Math.min(L, Math.round(t / step) * step));
+      bd = d;
+      best = [r.ax + ux * ts, r.az + uz * ts];
+      this.lineOnRuler = { n: i + 1, cm: blocksToCm(ts) };
+    });
+    return best;
+  }
+
   /** Shows only the controls that make sense right now. A pending request hides the tools. */
   private syncChrome() {
     // A symbol request only needs a tap on a symbol, so it hides the tools; a mark request keeps them.
@@ -396,8 +503,16 @@ export class MapView {
     this.protBar.hidden = req || this.tool !== 'busur';
     this.rulerBar.hidden = req || this.tool !== 'penggaris';
     this.rulerEndBtn.disabled = !this.ruler || !this.rulerLive;
-    this.readout.hidden = req || !(this.tool === 'busur' || this.tool === 'penggaris');
+    this.rulerDelBtn.disabled = !this.ruler;
+    this.pencilBar.hidden = req || this.tool !== 'pensil';
+    this.straightBtn.classList.toggle('on', this.straight);
+    this.lineStartBtn.hidden = !this.straight;
+    this.lineEndBtn.hidden = !this.straight;
+    this.lineEndBtn.disabled = !this.lineLive;
+    this.readout.hidden = req || !(this.tool === 'busur' || this.tool === 'penggaris' || this.straightPencil());
   }
+
+  private straightPencil() { return this.tool === 'pensil' && this.straight; }
 
   private writeTool(): 'pensil' | 'pena' | null {
     return this.tools.has('pensil') ? 'pensil' : this.tools.has('pena') ? 'pena' : null;
@@ -471,7 +586,19 @@ export class MapView {
       if (!this.ruler) this.readout.textContent = 'Geser peta: taruh titik di tanda + lalu tekan Titik awal';
       else {
         const blocks = Math.hypot(this.ruler.bx - this.ruler.ax, this.ruler.bz - this.ruler.az);
-        this.readout.textContent = `Penggaris: ${fmtCm(blocks)} cm = ${fmtNum(Math.round(blocks * BLOCK_M))} m di medan`;
+        const n = this.rulers.length > 1 ? ` ${this.rulers.indexOf(this.ruler) + 1}/${this.rulers.length}` : '';
+        this.readout.textContent = `Penggaris${n}: ${fmtCm(blocks)} cm = ${fmtNum(Math.round(blocks * BLOCK_M))} m di medan`;
+      }
+    } else if (this.straightPencil()) {
+      const l = this.drawing?.pts.length === 4 ? this.drawing : this.lineLive;
+      if (!l) {
+        this.readout.textContent = this.rulers.length
+          ? 'Garis lurus: ujung garis menempel ke skala penggaris'
+          : 'Garis lurus: tarik, atau Mulai garis di tanda +';
+      } else {
+        const blocks = Math.hypot(l.pts[2] - l.pts[0], l.pts[3] - l.pts[1]);
+        const on = this.lineOnRuler ? ` · ujung di ${fmtCm1(this.lineOnRuler.cm)} cm penggaris ${this.lineOnRuler.n}` : '';
+        this.readout.textContent = `Garis: ${fmtCm(blocks)} cm${on}`;
       }
     } else if (this.tool === 'busur') {
       if (!this.protractor) this.readout.textContent = 'Ketuk titik untuk meletakkan busur';
@@ -597,6 +724,10 @@ export class MapView {
       [this.ruler.bx, this.ruler.bz] = this.centrePoint();
       this.updateReadout();
     }
+    if (this.lineLive && this.straightPencil()) {
+      [this.lineLive.pts[2], this.lineLive.pts[3]] = this.snapLine(this.cx, this.cz);
+      this.updateReadout();
+    }
     const ctx = this.ctx;
     const W = this.canvas.width / this.dpr;
     const H = this.canvas.height / this.dpr;
@@ -688,7 +819,7 @@ export class MapView {
     if (this.devMarker) this.drawDevMarker(this.devMarker, m);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    if (this.tool === 'penggaris' && this.request?.kind !== 'symbol') this.drawCrosshair(W / 2, H / 2);
+    if ((this.tool === 'penggaris' || this.straightPencil()) && this.request?.kind !== 'symbol') this.drawCrosshair(W / 2, H / 2);
     if (this.loupe) this.drawLoupe(this.loupe.x, this.loupe.y, W);
     if (this.showLegend) this.drawLegend(W, H);
   }
@@ -769,24 +900,81 @@ export class MapView {
     }
   }
 
+  /**
+   * A clear plastic ruler laid from end a to end b: its measuring edge runs along a→b with cm, half-cm
+   * and mm graduations (mm only once they are far enough apart to read), numbered from end a.
+   */
+  private drawRuler(r: Ruler, n: number, m: number, active: boolean) {
+    const ctx = this.ctx;
+    const L = Math.hypot(r.bx - r.ax, r.bz - r.az);
+    const col = active ? C.tool : 'rgba(210, 50, 45, 0.6)';
+    ctx.save();
+    ctx.translate(r.ax, r.az);
+    ctx.rotate(Math.atan2(r.bz - r.az, r.bx - r.ax));
+    ctx.scale(m, m);
+    // now in screen px along the edge: x from 0 (end a) to len, +y is the ruler body
+    const len = L / m;
+    const body = 26;
+    ctx.fillStyle = active ? 'rgba(255, 255, 255, 0.62)' : 'rgba(255, 255, 255, 0.35)';
+    ctx.fillRect(-8, 0, len + 16, body);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = active ? 1.6 : 1.1;
+    ctx.strokeRect(-8, 0, len + 16, body);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(len, 0);
+    ctx.stroke();
+
+    const mmPx = blocksPerCm() / 10 / m;
+    const showMm = mmPx >= 3.5, showHalf = mmPx * 5 >= 4;
+    const labelEvery = mmPx * 10 >= 18 ? 1 : mmPx * 10 >= 7 ? 5 : 10;
+    ctx.lineWidth = 1;
+    ctx.fillStyle = col;
+    ctx.font = '600 9px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const flip = Math.cos(Math.atan2(r.bz - r.az, r.bx - r.ax) + this.rot) < 0;
+    const total = Math.floor(blocksToCm(L) * 10 + 1e-6);
+    ctx.beginPath();
+    for (let k = 0; k <= total; k++) {
+      const cm = k % 10 === 0, half = k % 5 === 0;
+      if (!cm && !(half && showHalf) && !showMm) continue;
+      const x = k * mmPx;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, cm ? 11 : half ? 7.5 : 4.5);
+    }
+    ctx.stroke();
+    for (let k = 0; k <= total; k += 10 * labelEvery) {
+      ctx.save();
+      ctx.translate(k * mmPx, 18);
+      if (flip) ctx.rotate(Math.PI);
+      ctx.fillText(String(k / 10), 0, 0);
+      ctx.restore();
+    }
+    // end marks
+    ctx.lineWidth = 2;
+    for (const x of [0, len]) {
+      ctx.beginPath();
+      ctx.moveTo(x, -6);
+      ctx.lineTo(x, body);
+      ctx.stroke();
+    }
+    ctx.restore();
+    const label = `${this.rulers.length > 1 ? `${n}: ` : ''}${fmtCm(L)} cm`;
+    const nx = -(r.bz - r.az) / (L || 1), nz = (r.bx - r.ax) / (L || 1);
+    ctx.font = `700 ${active ? 13 : 11}px system-ui, sans-serif`;
+    this.text(
+      (r.ax + r.bx) / 2 - nx * 11 * m, (r.az + r.bz) / 2 - nz * 11 * m, label, col,
+      Math.atan2(r.bz - r.az, r.bx - r.ax) + (flip ? Math.PI : 0), m, true,
+    );
+  }
+
   private drawToolOverlays(m: number) {
     const ctx = this.ctx;
-    if (this.ruler && this.tool === 'penggaris') {
-      const r = this.ruler;
-      ctx.strokeStyle = C.tool;
-      ctx.lineWidth = 2 * m;
-      ctx.beginPath();
-      ctx.moveTo(r.ax, r.az);
-      ctx.lineTo(r.bx, r.bz);
-      ctx.stroke();
-      for (const [x, zz] of [[r.ax, r.az], [r.bx, r.bz]]) {
-        ctx.beginPath();
-        ctx.arc(x, zz, 3 * m, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      const blocks = Math.hypot(r.bx - r.ax, r.bz - r.az);
-      ctx.font = '700 12px system-ui, sans-serif';
-      this.text((r.ax + r.bx) / 2, (r.az + r.bz) / 2 - 10 * m, `${fmtCm(blocks)} cm`, C.tool, 0, m, true);
+    // Rulers stay visible while drawing straight lines, so the line can be laid on their ticks.
+    if (this.tool === 'penggaris' || this.straightPencil()) {
+      this.rulers.forEach((r, i) => this.drawRuler(r, i + 1, m, r === this.ruler && this.tool === 'penggaris'));
     }
     if (this.protractor && this.tool === 'busur') {
       const p = this.protractor;
@@ -1173,13 +1361,16 @@ export class MapView {
     this.loupe = { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  /** Which ruler end lies under the finger (within 28 screen px), if any. */
-  private rulerEndAt(x: number, z: number): 'a' | 'b' | null {
-    const r = this.ruler;
-    if (!r) return null;
-    const da = Math.hypot(r.ax - x, r.az - z) * this.zoom, db = Math.hypot(r.bx - x, r.bz - z) * this.zoom;
-    if (Math.min(da, db) > 28) return null;
-    return db <= da ? 'b' : 'a';
+  /** Which ruler end lies under the finger (within 28 screen px), if any; the active ruler wins ties. */
+  private rulerEndAt(x: number, z: number): { r: Ruler; end: 'a' | 'b' } | null {
+    let best: { r: Ruler; end: 'a' | 'b' } | null = null;
+    let bd = 28;
+    for (const r of [...this.rulers].sort((p, q) => Number(q === this.ruler) - Number(p === this.ruler))) {
+      const da = Math.hypot(r.ax - x, r.az - z) * this.zoom, db = Math.hypot(r.bx - x, r.bz - z) * this.zoom;
+      if (db < bd) { bd = db; best = { r, end: 'b' }; }
+      if (da < bd) { bd = da; best = { r, end: 'a' }; }
+    }
+    return best;
   }
 
   private onDown = (e: PointerEvent) => {
@@ -1213,15 +1404,19 @@ export class MapView {
     this.gesture = this.tool === 'geser' ? 'pan' : 'tool';
     if (this.tool === 'penggaris') {
       // Touch: drag an end of the ruler, or pan (the ends are set with the buttons). Mouse: drag to measure.
-      const end = this.rulerEndAt(x, z);
-      if (end) {
+      const hit = this.rulerEndAt(x, z);
+      if (hit) {
+        if (this.rulerLive && hit.r !== this.ruler) this.rulerLive = false;
+        this.ruler = hit.r;
         this.gesture = 'ruler-end';
-        this.rulerEnd = end;
-        if (end === 'b') this.rulerLive = false;
+        this.rulerEnd = hit.end;
+        if (hit.end === 'b') this.rulerLive = false;
         this.setLoupe(e);
       } else if (e.pointerType === 'mouse') {
         const [sx, sz] = this.snap(x, z);
+        if (this.rulerLive && this.ruler) this.rulers.splice(this.rulers.indexOf(this.ruler), 1);
         this.ruler = { ax: sx, az: sz, bx: sx, bz: sz };
+        this.rulers.push(this.ruler);
         this.rulerEnd = 'b';
         this.rulerLive = false;
         this.gesture = 'ruler-end';
@@ -1233,7 +1428,11 @@ export class MapView {
     } else if (this.tool === 'pensil') {
       const wt = this.writeTool();
       if (!wt) return;
-      this.drawing = { pts: [x, z], pen: wt === 'pena' };
+      if (this.straight) {
+        const [sx, sz] = this.snapLine(x, z);
+        this.drawing = { pts: [sx, sz, sx, sz], pen: wt === 'pena' };
+        this.setLoupe(e);
+      } else this.drawing = { pts: [x, z], pen: wt === 'pena' };
       this.strokes.push(this.drawing);
     } else if (this.tool === 'hapus') {
       this.eraseAt(x, z);
@@ -1300,6 +1499,10 @@ export class MapView {
         if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 10) this.gesture = 'pan';
       } else if (this.tool === 'titik') {
         this.setLoupe(e);
+      } else if (this.tool === 'pensil' && this.drawing && this.straight) {
+        [this.drawing.pts[2], this.drawing.pts[3]] = this.snapLine(x, z);
+        this.setLoupe(e);
+        this.updateReadout();
       } else if (this.tool === 'pensil' && this.drawing) {
         const pts = this.drawing.pts;
         if (Math.hypot(pts[pts.length - 2] - x, pts[pts.length - 1] - z) * this.zoom > 2) pts.push(x, z);
@@ -1339,6 +1542,9 @@ export class MapView {
         // Press, slide while watching the loupe, release to place.
         const wt = this.writeTool();
         if (wt) this.marks.push({ x, z, label: String(this.marks.length + 1), pen: wt === 'pena' });
+      } else if (this.tool === 'pensil' && this.drawing && this.straight) {
+        const p = this.drawing.pts;
+        if (Math.hypot(p[2] - p[0], p[3] - p[1]) * this.zoom < 3) this.dropStroke(this.drawing);
       } else if (this.tool === 'pensil' && this.drawing && this.drawing.pts.length < 4) {
         this.strokes.pop();
       }
@@ -1381,6 +1587,21 @@ export function blocksToCm(blocks: number): number {
 
 function fmtCm(blocks: number): string {
   return blocksToCm(blocks).toFixed(2).replace('.', ',');
+}
+
+function fmtCm1(cm: number): string {
+  return cm.toFixed(1).replace('.', ',');
+}
+
+/** Blocks per paper centimetre at the map scale (100 at 1:25.000 with 2,5 m blocks). */
+function blocksPerCm(): number {
+  return MAP_SCALE / 100 / BLOCK_M;
+}
+
+/** Ruler tick a straight line snaps to: mm when they are 6 px apart on screen, else half-cm, else cm. */
+function tickStep(zoom: number): number {
+  const mm = blocksPerCm() / 10;
+  return mm * zoom >= 6 ? mm : mm * 5 * zoom >= 6 ? mm * 5 : mm * 10;
 }
 
 function polyNear(pts: number[], x: number, z: number, r: number): boolean {

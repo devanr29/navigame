@@ -83,6 +83,10 @@ await centreOn(600, 600);
 await page.waitForTimeout(100);
 const ro2 = await page.locator('.map-readout').textContent();
 check('ruler buttons: 200 blocks = 2 cm, end stays after Titik akhir', /2,0\d cm|1,9\d cm/.test(ro2), ro2);
+check('several rulers stay on the sheet', (await g(() => window.__game.map.rulers.length)) === 2);
+check('readout numbers the active ruler', /Penggaris 2\/2/.test(ro2), ro2);
+await page.getByRole('button', { name: 'Buang' }).click();
+check('Buang picks up only the active ruler', (await g(() => window.__game.map.rulers.length)) === 1);
 check('map notes list the paired reading with its back azimuth', /back az/.test(await page.locator('.map-notes').textContent()), await page.locator('.map-notes').textContent());
 
 await tool('Pensil');
@@ -95,6 +99,17 @@ await tool('Hapus');
 const [mx, my] = [(ax + bx) / 2, ay + 40];
 await page.mouse.move(mx - 30, my); await page.mouse.down(); await page.mouse.move(mx + 30, my, { steps: 6 }); await page.mouse.up();
 check('eraser removes the pencil stroke', (await g(() => window.__game.map.strokes.length)) === 0);
+// straight pencil line: its ends snap to the ticks of the ruler still lying at z = 100
+await tool('Pensil');
+await page.getByRole('button', { name: 'Garis lurus' }).click();
+const [lx, ly] = await toScreen(233, 101), [lx2, ly2] = await toScreen(240, 160);
+await page.mouse.move(lx, ly); await page.mouse.down(); await page.mouse.move(lx2, ly2, { steps: 6 }); await page.mouse.up();
+const sl = await g(() => window.__game.map.strokes[0]?.pts);
+const onTick = sl && Math.abs(sl[1] - 100) < 1e-6 && [10, 50, 100].some((st) => Math.abs((sl[0] - 100) / st - Math.round((sl[0] - 100) / st)) < 1e-6);
+check('straight line is two points, start snapped to a ruler tick', sl?.length === 4 && onTick, JSON.stringify(sl));
+check('readout gives the line length and ruler position', /Garis: .* cm/.test(await page.locator('.map-readout').textContent()), await page.locator('.map-readout').textContent());
+await page.getByRole('button', { name: 'Garis lurus' }).click();
+await g(() => { window.__game.map.strokes.length = 0; });
 
 // lock orientation then try to rotate with Q
 await page.locator('.map-tools button', { hasText: 'Kunci arah' }).click();
