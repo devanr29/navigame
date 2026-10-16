@@ -52,7 +52,7 @@ describe('world generation', () => {
     expect(forest / (N * N)).toBeLessThan(0.3);
     expect(deckOverWater).toBeGreaterThan(10); // the bridge spans the river
     expect(w.roads.length).toBe(4); // every route was found: the through-road ...
-    expect(w.trails.length).toBe(4); // ... and the footpaths
+    expect(w.trails.length).toBe(5); // ... and the footpaths, the summit spur included
     let road = 0;
     for (let i = 0; i < N * N; i++) if (w.surface[i] === 6) road++;
     expect(road).toBeGreaterThan(1000); // the road is in the world, not only on the map

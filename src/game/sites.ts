@@ -62,8 +62,8 @@ export function findSites(w: WorldData): Sites {
     for (let dz = -r; dz <= r; dz += 2) for (let dx = -r; dx <= r; dx += 2) {
       if (!inside(x + dx, z + dz, 0)) continue;
       const v = w.surface[idx(x + dx, z + dz)];
-      // a road counts as a way too
-      if (v === s || (s === Surface.Path && v === Surface.Road)) return true;
+      // a road (and its shoulder) counts as a way too
+      if (v === s || (s === Surface.Path && (v === Surface.Road || v === Surface.RoadEdge))) return true;
     }
     return false;
   };

@@ -11,9 +11,10 @@ export const TOP: Record<number, RGB> = {
   [Surface.ForestFloor]: hex(0x4f7a3a),
   [Surface.Stone]: hex(0x9a9a92),
   [Surface.Sand]: hex(0xd8c88e),
-  [Surface.Path]: hex(0xa8865a),
+  [Surface.Path]: hex(0x8a643c),
   [Surface.RiverBed]: hex(0x7d7058),
-  [Surface.Road]: hex(0xb9ad97),
+  [Surface.Road]: hex(0x8c8474),
+  [Surface.RoadEdge]: hex(0x584c40),
 };
 
 export const SIDE: Record<number, RGB> = {
@@ -24,6 +25,7 @@ export const SIDE: Record<number, RGB> = {
   [Surface.Path]: hex(0x8a6a48),
   [Surface.RiverBed]: hex(0x6d6250),
   [Surface.Road]: hex(0x8f8574),
+  [Surface.RoadEdge]: hex(0x6a5d4e),
 };
 
 export const WOOD = hex(0x8b5a2b);

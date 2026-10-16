@@ -49,6 +49,8 @@ export const Surface = {
   RiverBed: 5,
   /** Road (jalan): wider than a footpath, gravel. */
   Road: 6,
+  /** Road shoulder: the darker packed edge either side of the gravel. Surfaces must stay below 8 (chunk key). */
+  RoadEdge: 7,
 } as const;
 
 export const Zone = {

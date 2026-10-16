@@ -227,7 +227,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
 
   // ---------------------------------------------------------------- 5. Roads and trails (A* over terrain)
   onProgress('Membuka jalan setapak', 0);
-  // 1 = footpath, 2 = verge (no trees), 3 = road
+  // 1 = footpath, 2 = verge (no trees), 3 = road, 4 = road shoulder
   const trailMask = new Uint8Array(NN);
   const roads: Polyline[] = [];
   const trails: Polyline[] = [];
@@ -245,6 +245,9 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     [J2, [tower[0] + 0.5, tower[1] + 3.5], false],
     [J2, E3, true],
   ];
+  // Per cell: sum and count of the centreline heights within reach, for levelling.
+  const waySum = new Float32Array(NN);
+  const wayW = new Uint16Array(NN);
   routes.forEach(([a, b, road], k) => {
     const cells = astar(a, b);
     if (cells.length < 2) return;
@@ -253,8 +256,36 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     if (k === 2) poly.unshift(bc[0], bc[1]);
     (road ? roads : trails).push(poly);
     rasterTrail(poly, road);
-    onProgress('Membuka jalan setapak', (k + 1) / routes.length);
+    onProgress('Membuka jalan setapak', (k + 1) / (routes.length + 1));
   });
+  // A footpath up Puncak Pasir Malang, joining the network at a junction of its own away from J1 / J2,
+  // so the summit can be walked to and the map shows a third, unnamed fork to tell apart.
+  {
+    let best = Infinity;
+    let join: P | null = null;
+    for (const w of [...roads, ...trails]) {
+      for (let k = 0; k < w.length / 2; k++) {
+        const p: P = [w[k * 2], w[k * 2 + 1]];
+        if (d2(p[0], p[1], J1) < 50 * 50 || d2(p[0], p[1], J2) < 50 * 50 || d2(p[0], p[1], E1) < 30 * 30) continue;
+        const i = Math.floor(p[1]) * N + Math.floor(p[0]);
+        if (water[i] >= 0 || deck[i] >= 0) continue;
+        const d = d2(p[0], p[1], lone);
+        if (d < best) { best = d; join = p; }
+      }
+    }
+    if (join && best > 25 * 25) {
+      const cells = astar([lone[0] + 0.5, lone[1] + 2.5], join);
+      if (cells.length >= 2) {
+        const poly = smoothCells(cells);
+        poly.push(join[0], join[1]); // meet the way exactly, so the fork is clean on the map
+        trails.push(poly);
+        rasterTrail(poly, false);
+      }
+    }
+  }
+  levelWays();
+  syncHeight();
+  onProgress('Membuka jalan setapak', 1);
 
   // ---------------------------------------------------------------- 6. Surfaces
   for (let z = 0; z < N; z++) {
@@ -272,6 +303,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
       if (water[i] >= 0) s = Surface.RiverBed;
       if (trailMask[i] === 1) s = Surface.Path;
       if (trailMask[i] === 3) s = Surface.Road;
+      if (trailMask[i] === 4) s = Surface.RoadEdge;
       surface[i] = s;
     }
   }
@@ -503,15 +535,52 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   }
 
   /**
-   * Marks trail cells (about 2 blocks wide, a road about 3.5); where the way fords water it gets a
+   * Levels each way across its width to the height of its centreline, so a road reads as one flat
+   * ribbon stepping only along its length (a cut into the slope above, a fill below); the verge
+   * eases halfway back to the natural ground. The level is the mean of the centreline within reach,
+   * so where two stretches pass close (a hairpin, a fork) the ground blends between them instead of
+   * snapping to a wall.
+   */
+  function levelWays() {
+    const lev = new Uint8Array(NN); // 1 = levelled way cell (not verge)
+    for (let i = 0; i < NN; i++) {
+      const m = trailMask[i];
+      if (!m || water[i] >= 0 || deck[i] >= 0 || solid[i] || wayW[i] === 0) continue;
+      const lvl = waySum[i] / wayW[i];
+      heightF[i] = m === 2 ? (heightF[i] + lvl) / 2 : lvl;
+      if (m !== 2) lev[i] = 1;
+    }
+    // Where a bend meets a climb the mean can still leave a ledge: spread any step steeper than a
+    // block between neighbouring way cells over both, so the way stays walkable.
+    for (let it = 0; it < 24; it++) {
+      let moved = false;
+      for (let i = 0; i < NN - N; i++) {
+        if (!lev[i]) continue;
+        for (const j of [i + 1, i + N]) {
+          if (!lev[j]) continue;
+          const d = heightF[j] - heightF[i];
+          if (Math.abs(d) <= 1.1) continue;
+          const e = (d - Math.sign(d) * 1.1) / 2;
+          heightF[i] += e;
+          heightF[j] -= e;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  /**
+   * Marks trail cells (about 2.5 blocks wide, a road about 4 with its shoulders); where the way fords water it gets a
    * plank crossing.
    */
   function rasterTrail(poly: Polyline, road: boolean) {
-    const core = road ? 2.6 : 0.85, verge = road ? 5 : 2.6, R = road ? 2 : 1;
+    const core = road ? 4.8 : 1.4, edge = 1.8, verge = road ? 9 : 4, R = road ? 3 : 2;
     const dense = resample(poly, 0.4);
     for (let k = 0; k < dense.length / 2; k++) {
       const px = dense[k * 2];
       const pz = dense[k * 2 + 1];
+      const lvl = sampleH(px, pz);
       for (let dz = -R; dz <= R; dz++) {
         for (let dx = -R; dx <= R; dx++) {
           const x = Math.floor(px + dx);
@@ -521,9 +590,15 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
           const ddz = z + 0.5 - pz;
           const i = z * N + x;
           const dd = ddx * ddx + ddz * ddz;
+          if (dd <= verge) { waySum[i] += lvl; wayW[i]++; }
           if (dd <= core) {
             if (water[i] >= 0 && deck[i] < 0 && riverId[i] === 2) deck[i] = water[i];
-            if (water[i] < 0 && trailMask[i] !== 3) trailMask[i] = road ? 3 : 1;
+            if (water[i] >= 0) continue;
+            if (road) {
+              // gravel in the middle, a darker packed shoulder along each edge
+              if (dd <= edge) trailMask[i] = 3;
+              else if (trailMask[i] !== 3) trailMask[i] = 4;
+            } else if (trailMask[i] !== 3 && trailMask[i] !== 4) trailMask[i] = 1;
           } else if (dd <= verge && !trailMask[i]) {
             trailMask[i] = 2; // verge: keeps trees off the trail edge
           }
