@@ -177,7 +177,7 @@ export class Game {
     await this.screens.title();
     for (;;) {
       const n = this.opts.dev
-        ? await this.screens.levels(LEVELS, { ...this.progress, unlocked: 10 }, this.devLevelOptions())
+        ? await this.screens.levels(LEVELS, { ...this.progress, unlocked: LEVELS.length }, this.devLevelOptions())
         : await this.screens.levels(LEVELS, this.progress);
       await this.playLevel(n);
     }
@@ -188,7 +188,7 @@ export class Game {
     for (;;) {
       const outcome = await this.playOnce(level);
       if (outcome === 'menu') return;
-      if (outcome === 'next') level = Math.min(10, level + 1);
+      if (outcome === 'next') level = Math.min(LEVELS.length, level + 1);
     }
   }
 
@@ -229,7 +229,7 @@ export class Game {
       };
       this.recordResult(n, result.passed, result.score);
       this.devtools?.quizEnded(result);
-      return this.screens.debrief(info, result, missing, n < 10, () => this.peekMap());
+      return this.screens.debrief(info, result, missing, n < LEVELS.length, () => this.peekMap());
     }
 
     // ---- field mission
@@ -262,14 +262,14 @@ export class Game {
     r.lessons.unshift(...extraLessons);
     this.recordResult(n, r.passed, r.score);
     this.devtools?.missionEnded(n, r);
-    const out = await this.screens.debrief(info, r, missing, n < 10, () => this.peekMap());
+    const out = await this.screens.debrief(info, r, missing, n < LEVELS.length, () => this.peekMap());
     mission.cleanup();
     this.mission = null;
     return out;
   }
 
   private recordResult(n: number, passed: boolean, score: number) {
-    if (passed) this.progress.unlocked = Math.max(this.progress.unlocked, Math.min(10, n + 1));
+    if (passed) this.progress.unlocked = Math.max(this.progress.unlocked, Math.min(LEVELS.length, n + 1));
     this.progress.best[n] = Math.max(this.progress.best[n] ?? 0, score);
     saveProgress(this.progress, this.opts.dev ? DEV_KEY : undefined);
   }
@@ -321,6 +321,10 @@ export class Game {
       lockCompass: (az) => {
         this.compass.locked = az;
         this.team.locked = az;
+      },
+      relocate: (x, z, faceAz) => {
+        this.devTeleport(x, z);
+        this.player.teleport(x, z, faceAz);
       },
     };
   }
@@ -732,6 +736,7 @@ export class Game {
     return dev;
   }
 
+  /** Moves the player without walking (developer teleport, or a mission moving to its next site). */
   private devTeleport(x: number, z: number) {
     this.player.teleport(x, z, azimuthOfYaw(this.player.yaw));
     // The jump is not walking: keep it out of the pace counter.

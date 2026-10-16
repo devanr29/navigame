@@ -64,9 +64,22 @@ export interface Progress {
   paceCount: number | null;
 }
 
-const KEY = 'navigame-progress-v1';
+const KEY = 'navigame-progress-v2';
+/** Saves from the 10-level game, converted once to the 6-level numbering. */
+const KEY_V1 = 'navigame-progress-v1';
+/** Old level number → new level (2+3 merged; 6, 7, 8 and 9 merged into navigasi tertutup). */
+const V1_TO_V2 = [0, 1, 2, 2, 3, 4, 5, 5, 5, 5, 6];
 /** Developer mode keeps its own progress, so testing never touches a student's saved levels. */
 export const DEV_KEY = 'navigame-progress-dev';
+
+function fromV1(p: Progress): Progress {
+  const best: Record<number, number> = {};
+  for (const [k, v] of Object.entries(p.best ?? {})) {
+    const n = V1_TO_V2[Number(k)];
+    if (n) best[n] = Math.max(best[n] ?? 0, v);
+  }
+  return { unlocked: V1_TO_V2[Math.min(10, Math.max(1, p.unlocked))], best, paceCount: p.paceCount ?? null };
+}
 
 export function loadProgress(key = KEY): Progress {
   try {
@@ -74,6 +87,15 @@ export function loadProgress(key = KEY): Progress {
     if (raw) {
       const p = JSON.parse(raw) as Progress;
       if (typeof p.unlocked === 'number') return { unlocked: p.unlocked, best: p.best ?? {}, paceCount: p.paceCount ?? null };
+    }
+    const old = key === KEY ? localStorage.getItem(KEY_V1) : null;
+    if (old) {
+      const p = JSON.parse(old) as Progress;
+      if (typeof p.unlocked === 'number') {
+        const q = fromV1(p);
+        saveProgress(q, key);
+        return q;
+      }
     }
   } catch {
     // storage unavailable (private mode): play without saving

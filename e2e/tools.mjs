@@ -4,7 +4,7 @@ const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google
 const page = await browser.newPage({ viewport: { width: 844, height: 390 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto('http://localhost:5173/?debug&autostart&level=3');
+await page.goto('http://localhost:5173/?debug&autostart&level=2');
 await page.waitForSelector('#hud:not([hidden])', { timeout: 120000 });
 const g = (fn, arg) => page.evaluate(fn, arg);
 const toScreen = (x, z) => g(([x, z]) => {

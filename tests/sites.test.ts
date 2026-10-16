@@ -19,31 +19,16 @@ describe.each(['jamadagni', 'navter', '42'])('mission sites for seed %s', (seed)
   });
 
   it('resection spots see at least two landmarks', () => {
-    for (const p of [s.resection, s.orient, s.final.start]) {
+    for (const p of [s.resection, s.final.start]) {
       expect(w.zone[at(p)]).toBe(Zone.Open);
       expect(sight.visibleLandmarks(p[0], eye(p), p[1], 420).length).toBeGreaterThanOrEqual(2);
     }
-    expect(sight.visibleLandmarks(s.orient[0], eye(s.orient), s.orient[1], 420).length).toBeGreaterThanOrEqual(3);
   });
 
   it('forest targets are inside the forest', () => {
     expect(w.zone[at(s.forest.target)]).toBe(Zone.Forest);
     expect(w.zone[at(s.final.target)]).toBe(Zone.Forest);
     expect(w.zone[at(s.forest.start)]).toBe(Zone.Open);
-  });
-
-  it('the declination leg is walkable: no step over one block, modest climb', () => {
-    const { start, target } = s.declination;
-    const L = Math.hypot(target[0] - start[0], target[1] - start[1]);
-    expect(L).toBeGreaterThan(125);
-    let prev = w.height[at(start)], lo = prev, hi = prev;
-    for (let d = 1; d < L; d++) {
-      const p: [number, number] = [start[0] + ((target[0] - start[0]) * d) / L, start[1] + ((target[1] - start[1]) * d) / L];
-      const h = w.height[at(p)];
-      expect(Math.abs(h - prev)).toBeLessThanOrEqual(1);
-      prev = h; lo = Math.min(lo, h); hi = Math.max(hi, h);
-    }
-    expect(hi - lo).toBeLessThanOrEqual(24);
   });
 
   it('the smoke is visible from both intersection posts', () => {

@@ -9,21 +9,17 @@ import { azimuthTo, angleDiff, Sight, smokeTarget } from '../tools/sight';
 export type P = [number, number];
 
 export interface Sites {
-  /** Level 2: open spot where at least three landmarks are visible. */
-  orient: P;
-  /** Level 3: open spot off the trails where two landmarks cross at a good angle (a third in view if possible). */
+  /** Level 2: open spot off the trails where two landmarks cross at a good angle (a third in view if possible). */
   resection: P;
-  /** Level 5: navter route along trails through two crossroads. */
+  /** Level 4: navter route along trails through two crossroads. */
   route: { start: P; dest: P; crossroads: P[] };
-  /** Level 4: smoke column seen from two posts with known coordinates. */
+  /** Level 3: smoke column seen from two posts with known coordinates. */
   intersection: { a: P; b: P; smoke: P };
-  /** Level 6: straight bearing leg in open terrain. */
-  declination: { start: P; target: P };
-  /** Level 7: a 100 m stretch of flat trail. */
+  /** Level 5: a 100 m stretch of flat trail for the pace calibration. */
   pace: { start: P; end: P };
-  /** Levels 8 and 9: from the forest edge through the forest. */
+  /** Level 5: from the forest edge through the forest. */
   forest: { start: P; target: P; obstacle: P };
-  /** Level 10: open start (resection), then through the forest to the target. */
+  /** Level 6: open start (resection), then through the forest to the target. */
   final: { start: P; target: P };
 }
 
@@ -118,11 +114,6 @@ export function findSites(w: WorldData): Sites {
     (s) => s.q + (s.ids.length >= 3 ? 25 : 0) + rng() * 8,
     w.spawn,
   );
-  const orient = pickSpot(
-    (s) => s.ids.length >= 3 && dist([s.x, s.z], resection) > 120,
-    (s) => s.ids.length * 30 + s.q + rng() * 8,
-    resection,
-  );
 
   // ---- forest legs: start at the forest edge, target deep inside, a walkable straight line between
   const legOk = (a: P, b: P) => {
@@ -170,13 +161,13 @@ export function findSites(w: WorldData): Sites {
     return out;
   };
 
-  // Level 10 start: open spot 50–130 blocks (125–325 m) from the forest with a good resection.
+  // Level 6 start: open spot 50–130 blocks (125–325 m) from the forest with a good resection.
   const finalStart = pickSpot(
     (s) => { const d = toForest[idx(s.x, s.z)]; return d >= 50 && d <= 130 && s.q >= 40; },
     (s) => s.q + rng() * 8,
     resection,
   );
-  // Level 10 target: deep in the forest, reached by a straight leg from the forest edge nearest the start.
+  // Level 6 target: deep in the forest, reached by a straight leg from the forest edge nearest the start.
   let finalTarget: P | null = null;
   {
     const edgesByDist = edgeCells
@@ -230,35 +221,6 @@ export function findSites(w: WorldData): Sites {
     }
   }
   const intersection = inter ?? { a: w.spawn, b: [w.spawn[0], w.spawn[1] + 100] as P, smoke: [w.spawn[0] + 150, w.spawn[1] + 50] as P };
-
-  // ---- declination leg: straight, open, dry, 130–160 blocks (325–400 m)
-  let decl: Sites['declination'] | null = null;
-  for (let k = 0; k < 400 && !decl; k++) {
-    const s: P = [30 + rng() * (N - 60), 30 + rng() * (N - 60)];
-    if (!isOpen(s[0], s[1]) || nearSurface(s[0], s[1], 4, Surface.Path)) continue;
-    const ang = rng() * Math.PI * 2;
-    const L = 130 + rng() * 30;
-    const t: P = [s[0] + Math.sin(ang) * L, s[1] - Math.cos(ang) * L];
-    if (!isOpen(t[0], t[1])) continue;
-    // Walkable on foot along the straight line: no water, no step over one block, modest total climb.
-    let ok = true, open = 0;
-    let prevH = w.height[idx(s[0], s[1])], lo = prevH, hi = prevH;
-    for (let d = 1; d < L && ok; d += 1) {
-      const x = s[0] + ((t[0] - s[0]) * d) / L, z = s[1] + ((t[1] - s[1]) * d) / L;
-      if (!inside(x, z, 3) || w.water[idx(x, z)] >= 0) { ok = false; break; }
-      // No tree on the line either: this leg teaches declination, detours come in level 9.
-      if (w.solid[idx(x, z)] || w.solid[idx(x + 1, z)] || w.solid[idx(x - 1, z)] || w.solid[idx(x, z + 1)] || w.solid[idx(x, z - 1)]) { ok = false; break; }
-      const h = w.height[idx(x, z)];
-      if (Math.abs(h - prevH) > 1) ok = false;
-      prevH = h;
-      lo = Math.min(lo, h);
-      hi = Math.max(hi, h);
-      if (w.zone[idx(x, z)] === Zone.Open) open++;
-    }
-    if (hi - lo > 24) ok = false;
-    if (ok && open / L > 0.9) decl = { start: s, target: t };
-  }
-  const declination = decl ?? { start: w.spawn, target: [w.spawn[0] + 140, w.spawn[1]] as P };
 
   // ---- pace course: 40 blocks (100 m) of trail with little climb
   let pace: Sites['pace'] | null = null;
@@ -326,11 +288,9 @@ export function findSites(w: WorldData): Sites {
   const route = { start: routeStart, dest: pointAlong(far, Math.min(80, polyLen(far) * 0.6)), crossroads: w.junctions };
 
   return {
-    orient,
     resection,
     route,
     intersection,
-    declination,
     pace: paceCourse,
     forest: { start: leg.start, target: leg.target, obstacle },
     final: { start: finalStart, target: finalTarget ?? leg.target },

@@ -120,25 +120,6 @@ const levels = {
   },
 
   async 2(page) {
-    const vis = await page.evaluate(() => T.visibleLandmarks());
-    for (const id of vis.slice(0, 3)) {
-      await page.evaluate(async (id) => { const r = await T.sightTarget(id); r.pairedWith = r.target; }, id);
-    }
-    // orient the map: open it with the right rotation for where we face
-    await page.evaluate(() => {
-      const g = T.g;
-      const facing = ((-g.player.yaw * 180 / Math.PI) % 360 + 360) % 360;
-      g.openMap(true);
-      g.map.rot = (-facing * Math.PI) / 180;
-      g.map.redraw();
-    });
-    await page.waitForTimeout(400);
-    await page.evaluate(() => T.g.openMap(false));
-    const r = await waitResult(page);
-    return { visible: vis, objectives: await page.evaluate(() => T.objectives()), result: r };
-  },
-
-  async 3(page) {
     // step 1: orient the map (required)
     await page.evaluate(() => {
       const g = T.g;
@@ -173,7 +154,7 @@ const levels = {
     return { visible: vis, lines, cross: x, truth: await page.evaluate(() => T.pos()), objectivesBefore, result: r };
   },
 
-  async 4(page) {
+  async 3(page) {
     const s = await page.evaluate(() => T.g.sites.intersection);
     const la = await page.evaluate(async () => {
       const r = await T.sightTarget(100);
@@ -200,7 +181,7 @@ const levels = {
     return { sites: s, la, lb, cross: x, objectives: await page.evaluate(() => T.objectives()), result: r };
   },
 
-  async 5(page) {
+  async 4(page) {
     const route = await page.evaluate(() => T.g.sites.route);
     const markHere = async () => {
       await clickAction(page, 'Tandai posisiku');
@@ -227,85 +208,12 @@ const levels = {
     return { objectives: await page.evaluate(() => T.objectives()), notes: await page.evaluate(() => T.g.notebook.notes), result: r };
   },
 
+  async 5(page) {
+    const calib = await calibrate(page);
+    return { calib, ...(await navtup(page, true)) };
+  },
+
   async 6(page) {
-    const s = await page.evaluate(() => T.g.sites.declination);
-    const mag = await page.evaluate(() => {
-      const { start, target } = T.g.sites.declination;
-      const grid = T.az(start[0], start[1], target[0], target[1]);
-      return { grid, mag: ((grid - 6) % 360 + 360) % 360 };
-    });
-    await clickAction(page, 'Kunci kompas');
-    await page.locator('.dialog-box label:nth-of-type(1) input').fill(String(Math.round(mag.mag)));
-    await page.getByRole('button', { name: 'Simpan' }).click();
-    // walk the locked bearing: face it and hold forward until near the target (or 160 s)
-    await page.evaluate((m) => { T.face((m.mag + 6) % 360); T.g.input.forceForward = true; }, mag);
-    const t0 = Date.now();
-    let d = 1e9, prev = null, stuck = 0, minD = 1e9;
-    while (Date.now() - t0 < 160000) {
-      d = await page.evaluate(() => { const t = T.g.sites.declination.target; return Math.hypot(T.g.player.x - t[0], T.g.player.z - t[1]); });
-      if (d < 3) break;
-      // walking briskly, the check can step past the post: stop once the distance grows again near it
-      if (minD < 10 && d > minD + 1) break;
-      minD = Math.min(minD, d);
-      // like a player: keep the bearing, jump up steps, sidestep what cannot be climbed
-      const p = await page.evaluate(() => T.pos());
-      if (prev && Math.hypot(p[0] - prev[0], p[1] - prev[1]) < 0.3) {
-        stuck++;
-        await page.evaluate((k) => {
-          T.g.input.jump();
-          if (k > 1) T.face((((-T.g.player.yaw * 180) / Math.PI) + (k % 2 ? 70 : -70) + 360) % 360);
-        }, stuck);
-        await page.waitForTimeout(700);
-      } else stuck = 0;
-      prev = p;
-      // back on the bearing, aiming at the (memorised) target point like following a compass line
-      await page.evaluate((m) => T.face((m.mag + 6) % 360), mag);
-      await page.waitForTimeout(500);
-    }
-    await page.evaluate(() => { T.g.input.forceForward = false; });
-    await clickAction(page, 'Selesai leg');
-    const r = await waitResult(page);
-    return { site: s, mag, endDistBlocks: d, result: r };
-  },
-
-  async 7(page) {
-    const course = await page.evaluate(() => {
-      const m = T.g.mission;
-      return { start: m.startP, end: m.endP };
-    });
-    // walk to the red flag
-    await page.evaluate((c) => { T.face(T.az(T.g.player.x, T.g.player.z, c.end[0], c.end[1])); T.g.input.forceForward = true; }, course);
-    const t0 = Date.now();
-    while (Date.now() - t0 < 60000) {
-      const done = await page.evaluate(() => T.g.mission.objectives[0].done);
-      if (done) break;
-      await page.evaluate((c) => T.face(T.az(T.g.player.x, T.g.player.z, c.end[0], c.end[1])), course);
-      await page.waitForTimeout(300);
-    }
-    await page.evaluate(() => { T.g.input.forceForward = false; });
-    const calib = await page.evaluate(() => T.g.progress.paceCount);
-    await clickAction(page, 'Mulai 300 m');
-    await page.evaluate(() => { T.g.input.forceForward = true; });
-    const t1 = Date.now();
-    let last = null;
-    while (Date.now() - t1 < 240000) {
-      const st = await page.evaluate(() => ({ m: T.g.pace.metres, p: T.pos() }));
-      if (st.m >= 300) break;
-      // walk straight; turn only when stuck against a step
-      if (last && Math.hypot(st.p[0] - last[0], st.p[1] - last[1]) < 0.2) await page.evaluate(() => { T.g.player.yaw += 1.2; });
-      last = st.p;
-      await page.waitForTimeout(500);
-    }
-    await page.evaluate(() => { T.g.input.forceForward = false; });
-    await clickAction(page, 'Selesai');
-    const r = await waitResult(page);
-    return { course, calib, objectives: await page.evaluate(() => T.objectives()), result: r };
-  },
-
-  async 8(page) { return navtup(page, false); },
-  async 9(page) { return navtup(page, true); },
-
-  async 10(page) {
     const info = await page.evaluate(() => ({ start: T.g.sites.final.start, target: T.g.sites.final.target }));
     const markHere = async () => {
       await clickAction(page, 'Tandai posisiku');
@@ -343,10 +251,26 @@ const levels = {
   },
 };
 
+/** Walks the 100 m calibration course from the green to the red flag; the mission then moves to the forest edge. */
+async function calibrate(page) {
+  const end = await page.evaluate(() => T.g.mission.calibFlags[1]);
+  await page.evaluate((e) => { T.face(T.az(T.g.player.x, T.g.player.z, e[0], e[1])); T.g.input.forceForward = true; }, end);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    if (await page.evaluate(() => T.g.mission.objectives[0].done)) break;
+    await page.evaluate((e) => T.face(T.az(T.g.player.x, T.g.player.z, e[0], e[1])), end);
+    await page.waitForTimeout(300);
+  }
+  await page.evaluate(() => { T.g.input.forceForward = false; });
+  await page.waitForTimeout(1500); // chunks load at the forest edge
+  return page.evaluate(() => ({ paceCount: T.g.progress.paceCount, atStart: Math.hypot(T.g.player.x - T.g.sites.forest.start[0], T.g.player.z - T.g.sites.forest.start[1]) }));
+}
+
 async function navtup(page, obstacle) {
+  // The compass azimuth is the map azimuth minus the (east) declination.
   const lock = await page.evaluate(() => {
-    const s = T.g.sites.forest.start, t = T.g.sites.forest.target;
-    return { az: Math.round(T.az(s[0], s[1], t[0], t[1])), legBlocks: Math.hypot(t[0] - s[0], t[1] - s[1]) };
+    const s = T.g.sites.forest.start, t = T.g.sites.forest.target, d = T.g.mission.declination;
+    return { az: Math.round((T.az(s[0], s[1], t[0], t[1]) - d + 360) % 360), legBlocks: Math.hypot(t[0] - s[0], t[1] - s[1]) };
   });
   return { lock, ...(await cutTo(page, lock.az, Math.round((lock.legBlocks * 2.5 * 133) / 100), obstacle)) };
 }
@@ -423,7 +347,7 @@ async function cutTo(page, az, steps, obstacle) {
 // ------------------------------------------------------------------ run
 
 const which = process.argv.slice(2).map(Number);
-const list = which.length ? which : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const list = which.length ? which : [1, 2, 3, 4, 5, 6];
 const results = await Promise.all(list.map(async (lv) => {
   // one browser per level so no page is a throttled background tab
   const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });

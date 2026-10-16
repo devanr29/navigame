@@ -207,13 +207,13 @@ Later levels let the player switch roles, so they understand what each person ne
 
 ## Additions beyond the material
 
-These three topics are not in the PPA Jamadagni summary but cause common beginner mistakes, so the game adds them as dedicated levels. Check each against your instructors' practice before teaching it.
+These three topics are not in the PPA Jamadagni summary but cause common beginner mistakes, so the game teaches them inside the navigasi tertutup level (level 5): calibrate the pace count first, then correct the declination before locking the compass, then detour around an obstacle on the leg. Check each against your instructors' practice before teaching it.
 
 ### 1. Magnetic declination
 
 The compass points to magnetic north, while the map's grid points to grid north. The angle between them is the declination, shown in the map legend.
 
-- **Game rule:** early levels use 0° declination. A dedicated level introduces a non-zero value in the legend, and every azimuth must be corrected when moving between compass and map.
+- **Game rule:** early levels use 0° declination. The navigasi tertutup level introduces a non-zero value in the legend, and every azimuth must be corrected when moving between compass and map.
 - **Why it matters, shown in game:** after a 1 km leg, a 1° error puts the player about 17 m off target; a 5° error, about 87 m. The game draws the drift on the map after the leg.
 - **Note for Indonesia:** real declination is small (around 1° or less in much of the country), so the practice level may use an exaggerated value to make the effect visible. Say so on screen.
 
@@ -221,7 +221,7 @@ The compass points to magnetic north, while the map's grid points to grid north.
 
 In navtup there are no landmarks to confirm progress, so distance must be counted.
 
-- **Calibration level:** the player walks a marked 100 m course and the game records their pace count (steps per 100 m).
+- **Calibration:** at the start of the navigasi tertutup level the player walks a marked 100 m course and the game records their pace count (steps per 100 m).
 - **In navtup:** the player converts the plotted map distance to metres, then to a target pace count. A tally counter on screen tracks progress, like pace beads.
 - **Terrain effect:** uphill slopes and thick vegetation shorten each step, so the same 100 m takes more steps. The game models this, and the debrief shows how far off the count was.
 
@@ -235,20 +235,16 @@ The game lets players make mistakes and teaches what to do next.
 
 ## Progression and levels
 
-Ten levels introduce one new skill at a time and end with a combined navter-to-navtup mission.
+Six levels introduce the skills in field order and end with a combined navter-to-navtup mission. Missions that repeated an earlier one were merged so a full run fits a class: orienting is part of the resection level, and declination, pacing and detours are taught inside the navigasi tertutup level.
 
 | Level | Focus | New mechanic | Pass condition |
 |---|---|---|---|
 | 1 | Base camp | Packing, coordinates, scale, contours, karvak | All map checks correct |
-| 2 | Orienting | Utarakan peta, orientasi medan | Map oriented within tolerance; 3 landmarks paired correctly |
-| 3 | Resection | Compass sighting, back azimuth, line drawing | Position error under a set distance |
-| 4 | Intersection | Azimuth from two known points | Object located within a set distance |
-| 5 | Navter route | Track planning, crossroad checks | Report arrival at the post; every crossroad identified correctly |
-| 6 | Declination | Non-zero declination | Corrected route reaches the target |
-| 7 | Pacing | Pace-count calibration | Paced 300 m within tolerance |
-| 8 | Navtup | Plotting, kunci kompas, four roles, stringline | Reach the target through dense forest |
-| 9 | Obstacles | Detour on a bearing, end-of-leg search | Reach the target after at least one detour |
-| 10 | Final mission | Open terrain to forest edge, then navtup to target | Full flow completed, with a final score |
+| 2 | Orienting and resection | Utarakan peta, orientasi medan, compass sighting, back azimuth, line drawing | Map oriented; position error under a set distance |
+| 3 | Intersection | Azimuth from two known points | Object located within a set distance |
+| 4 | Navter route | Track planning, crossroad checks | Report arrival at the post; every crossroad identified correctly |
+| 5 | Navtup | Pace calibration (100 m), non-zero declination, plotting, kunci kompas, four roles, stringline, detour | Reach the target through dense forest after a detour |
+| 6 | Final mission | Open terrain to forest edge, then navtup to target | Full flow completed, with a final score |
 
 **Scoring:** position error in metres, accuracy of each azimuth, and time. Checking position is never penalized, because frequent checking is the habit the game is teaching.
 

@@ -3,6 +3,7 @@ import logoUrl from '../assets/logo-jamadagni.png';
 import type { WorldData } from './gen/constants';
 import type { Sites } from './game/sites';
 import { enterFullscreen, Game } from './game/game';
+import { LEVELS } from './game/missions';
 
 const params = new URLSearchParams(location.search);
 const seed = params.get('seed') || 'jamadagni';
@@ -43,7 +44,7 @@ async function boot() {
   const lv = debug ? Number(params.get('level')) : NaN;
   const game = new Game(world, sites, {
     debug,
-    debugLevel: Number.isInteger(lv) && lv >= 1 && lv <= 10 ? lv : null,
+    debugLevel: Number.isInteger(lv) && lv >= 1 && lv <= LEVELS.length ? lv : null,
     dev,
     seed,
     logoUrl,

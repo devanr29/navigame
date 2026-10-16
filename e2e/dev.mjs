@@ -3,7 +3,7 @@
 import { chromium } from 'playwright-core';
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width: 844, height: 390 } });
-await ctx.addInitScript(() => localStorage.setItem('navigame-progress-v1', JSON.stringify({ unlocked: 2, best: {}, paceCount: null })));
+await ctx.addInitScript(() => localStorage.setItem('navigame-progress-v2', JSON.stringify({ unlocked: 2, best: {}, paceCount: null })));
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -18,11 +18,11 @@ await page.getByRole('button', { name: 'Mulai' }).click();
 await page.waitForSelector('.level-grid');
 check('all levels open in developer mode', (await page.locator('.level-card.locked').count()) === 0);
 check('developer options on level select', await page.locator('.dev-levels').isVisible());
-check('student progress untouched', (await g(() => JSON.parse(localStorage.getItem('navigame-progress-v1')).unlocked)) === 2);
+check('student progress untouched', (await g(() => JSON.parse(localStorage.getItem('navigame-progress-v2')).unlocked)) === 2);
 
-// ---- quick flow into level 4 (intersection)
+// ---- quick flow into level 3 (intersection)
 await page.locator('.dev-check input').check();
-await page.locator('.level-card:nth-child(4)').click();
+await page.locator('.level-card:nth-child(3)').click();
 await page.waitForSelector('#hud:not([hidden])', { timeout: 60000 });
 check('quick flow reaches the field', true);
 await page.locator('.dev-toggle').click();
@@ -77,13 +77,13 @@ check('reading from B ticks objective (shown in log)', obj && /Objektif 3/.test(
 
 // bug report
 const rep = await g(() => window.__game.devtools.report());
-check('report has mission state', rep.level === 4 && rep.mission.objectives.length === 5 && rep.readings.length >= 1);
+check('report has mission state', rep.level === 3 && rep.mission.objectives.length === 5 && rep.readings.length >= 1);
 
 // end the mission and check the result is logged
 await page.locator('#btn-menu').dispatchEvent('pointerdown');
 await page.waitForSelector('.score', { timeout: 10000 });
 const logEnd = await page.locator('.dev-log').textContent();
-check('mission end logged', /Level 4 selesai/.test(logEnd));
+check('mission end logged', /Level 3 selesai/.test(logEnd));
 check('dev progress stored separately', (await g(() => localStorage.getItem('navigame-progress-dev'))) !== null);
 
 check('no page errors', errors.length === 0, errors.join(' | '));

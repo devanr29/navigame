@@ -30,20 +30,20 @@ async function debrief() {
 }
 const teleport = (p) => g((p) => window.__game.devTeleport(p[0] + 0.5, p[1] + 0.5), p);
 
-// ---- level 4: erasing a drawn line keeps the objective done
-await enter(4);
+// ---- level 3: erasing a drawn line keeps the objective done
+await enter(3);
 await g(() => { const gm = window.__game, A = gm.mission.A; gm.map.lines.push({ x: A[0], z: A[1], az: 90, len: 50, pen: false }); });
 await page.waitForTimeout(300);
 const drawn = await g(() => window.__game.mission.objectives[1].done);
 await g(() => { window.__game.map.lines.length = 0; });
 await page.waitForTimeout(300);
 const kept = await g(() => window.__game.mission.objectives[1].done);
-check('L4 line objective stays done after erasing', drawn && kept, `${drawn} → ${kept}`);
+check('L3 line objective stays done after erasing', drawn && kept, `${drawn} → ${kept}`);
 await page.locator('#btn-menu').dispatchEvent('pointerdown');
 await debrief();
 
-// ---- level 5: all crossroads checked but no starting resection → not passed
-await enter(5);
+// ---- level 4: all crossroads checked but no starting resection → not passed
+await enter(4);
 const dest = await g(() => {
   const m = window.__game.mission;
   m.checked = m.checked.map(() => 0);
@@ -53,20 +53,30 @@ const dest = await g(() => {
 await teleport(dest);
 await g(() => window.__game.mission.actions().find((a) => a.id === 'arrive').run());
 let r = await debrief();
-check('L5 without starting resection fails', /Belum lulus/.test(r.title), r.title);
-check('L5 explains the missing resection', /Resection di titik awal tidak dilakukan/.test(r.text));
+check('L4 without starting resection fails', /Belum lulus/.test(r.title), r.title);
+check('L4 explains the missing resection', /Resection di titik awal tidak dilakukan/.test(r.text));
 
-// ---- level 8: walking straight to the post (no lock, no team) → not passed
-await enter(8);
+// Level 5 opens with the pace calibration: reuse a saved count to go straight to the forest edge.
+const skipCalib = () => g(() => {
+  const gm = window.__game;
+  gm.progress.paceCount = 133;
+  gm.mission.actions().find((a) => a.id === 'calib-skip').run();
+});
+
+// ---- level 5: walking straight to the post (no lock, no team) → not passed
+await enter(5);
+await skipCalib();
 await teleport(await g(() => window.__game.mission.target));
 r = await debrief();
-check('L8 without lock/team fails', /Belum lulus/.test(r.title), r.title);
-check('L8 explains the skipped flow', /tanpa alur navigasi tertutup/.test(r.text));
+check('L5 without lock/team fails', /Belum lulus/.test(r.title), r.title);
+check('L5 explains the skipped flow', /tanpa alur navigasi tertutup/.test(r.text));
 
-// ---- level 8: lock + team placed, then reaching the post → passed
-await enter(8);
+// ---- level 5: lock + team placed and the detour made, then reaching the post → passed
+await enter(5);
+await skipCalib();
 await g(async () => {
   const m = window.__game.mission;
+  m.detourDone = true;
   m.locked = 90;
   m.c.lockCompass(90);
   m.placeTeam();
@@ -74,15 +84,15 @@ await g(async () => {
 });
 await teleport(await g(() => window.__game.mission.target));
 r = await debrief();
-check('L8 with lock and team passes', /Berhasil/.test(r.title), r.title);
+check('L5 with lock and team passes', /Berhasil/.test(r.title), r.title);
 
-// ---- level 10: straight to the post → not passed, lessons name the skipped steps
-await enter(10);
+// ---- level 6: straight to the post → not passed, lessons name the skipped steps
+await enter(6);
 await teleport(await g(() => window.__game.mission.target));
 r = await debrief();
-check('L10 without the full flow fails', /Belum lulus/.test(r.title), r.title);
-check('L10 names the skipped steps', /resection awal tidak dilakukan/.test(r.text) && /tanpa alur navigasi tertutup/.test(r.text));
-check('L10 no misleading "meleset jauh" lesson', !/meleset jauh/.test(r.text));
+check('L6 without the full flow fails', /Belum lulus/.test(r.title), r.title);
+check('L6 names the skipped steps', /resection awal tidak dilakukan/.test(r.text) && /tanpa alur navigasi tertutup/.test(r.text));
+check('L6 no misleading "meleset jauh" lesson', !/meleset jauh/.test(r.text));
 
 check('no page errors', errors.length === 0, errors.join(' | '));
 await browser.close();
