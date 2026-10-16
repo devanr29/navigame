@@ -174,7 +174,9 @@ export class Sight {
       anyVisible = true;
       const hd = Math.max(0.5, Math.hypot(t.x - ex, t.z - ez));
       const err = Math.abs(angleDiff(gridAz, azimuthTo(ex, ez, t.x, t.z)));
-      const tolerance = Math.atan2(t.halfWidth, hd) * DEG + 0.8;
+      // Identification only: a sighting a few degrees off still names the landmark (as in the field).
+      // The recorded azimuth keeps the error, so it still shifts the drawn line and the fix.
+      const tolerance = Math.max(3, Math.atan2(t.halfWidth, hd) * DEG + 1.5);
       const lo = Math.atan2(t.y + t.bottom - ey, hd) * DEG - 3;
       const hi = Math.atan2(t.y + t.top - ey, hd) * DEG + 3;
       if (err <= tolerance && p >= lo && p <= hi && err < bestErr) { best = t.id; bestErr = err; bestDist = hd; }

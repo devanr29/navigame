@@ -41,7 +41,8 @@ export type MapTool = 'geser' | 'tanda' | 'pensil' | 'hapus' | 'penggaris' | 'bu
 export interface MapSymbol { x: number; z: number; label: string; id: number }
 
 /** Shown after a mission step is submitted (the truth, for the debrief). */
-export interface Reveal { x: number; z: number; label: string; color: string; from?: [number, number] }
+/** Debrief overlay: a point with a label, optionally joined by a dashed line from `from`. `dot: false` draws the line only. */
+export interface Reveal { x: number; z: number; label: string; color: string; from?: [number, number]; dot?: boolean }
 
 type Request =
   | { kind: 'mark'; prompt: string; done: (x: number, z: number) => void; at: [number, number] | null }
@@ -1089,6 +1090,7 @@ export class MapView {
     ctx.arc(0, 0, 1.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+      if (r.dot === false) continue;
     ctx.font = '700 10px system-ui, sans-serif';
     this.text(s.x + 8 * m, s.z, s.label, C.ink, 0, m, true, 'left');
   }

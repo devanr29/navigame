@@ -2,7 +2,7 @@
 // objectives that tick off from what the player actually does, offers context actions, and produces a
 // debrief. Level 1 (base camp) is the packing screen and map quiz only (see screens.ts).
 import * as THREE from 'three';
-import { BLOCK_M, Zone, type WorldData } from '../gen/constants';
+import { BLOCK_M, Zone, type Landmark, type WorldData } from '../gen/constants';
 import { fmtDMS, latSecAt, lonSecAt } from '../map/geo';
 import type { MapView } from '../map/mapView';
 import type { Player } from '../player/player';
@@ -12,7 +12,7 @@ import { flagPost, patok, smokeColumn, targetPost, thicket } from '../world/obje
 import type { PaceCounter } from './pace';
 import { DEFAULT_PACE } from './pace';
 import type { P, Sites } from './sites';
-import { SMOKE_TARGET, type Progress, type Reading, type ToolId } from './state';
+import { SMOKE_TARGET, type MapLine, type Progress, type Reading, type ToolId } from './state';
 import type { Team } from './team';
 
 export interface Objective { text: string; done: boolean; optional?: boolean }
@@ -51,6 +51,25 @@ const dist = (a: P, b: P) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const deg = (a: number) => `${String(Math.round(a)).padStart(3, '0')}°`;
 const here = (c: Ctx): P => [c.player.x, c.player.z];
+
+/** Unit direction (sheet coordinates) of a map line's azimuth. */
+const rayDir = (l: MapLine): P => [Math.sin((l.az * Math.PI) / 180), -Math.cos((l.az * Math.PI) / 180)];
+
+/** Distance from a point to a drawn line (a ray from its origin). */
+function rayMiss(l: MapLine, p: P): number {
+  const [dx, dz] = rayDir(l);
+  const vx = p[0] - l.x, vz = p[1] - l.z;
+  return vx * dx + vz * dz < 0 ? Math.hypot(vx, vz) : Math.abs(vx * dz - vz * dx);
+}
+
+/** Crossing point of two drawn lines (extended both ways), or null if they are nearly parallel. */
+function rayCross(a: MapLine, b: MapLine): P | null {
+  const [ax, az] = rayDir(a), [bx, bz] = rayDir(b);
+  const den = ax * bz - az * bx;
+  if (Math.abs(den) < 1e-6) return null;
+  const t = ((b.x - a.x) * bz - (b.z - a.z) * bx) / den;
+  return [a.x + ax * t, a.z + az * t];
+}
 
 /** Coordinates in the material's format: latitude first, then longitude (minutes′seconds″). */
 export function fmtCoord(p: P): string {
@@ -294,12 +313,14 @@ class Resection extends Mission {
       '1. Utarakan peta: lihat derajat kompas di atas layar, buka peta, putar peta dengan dua jari sampai utaranya searah utara sebenarnya.',
       '2. Bidik titik ekstrem pertama dengan kompas. Di Catatan, pasangkan bidikan dengan simbolnya di peta dan tulis back azimuth-nya. Di peta, letakkan busur di simbol itu dan gariskan back azimuth-nya.',
       '3. Ulangi langkah 2 untuk titik ekstrem kedua.',
-      '4. Tandai posisimu di peta, yaitu titik potong kedua garis, lalu kirim.',
+      '4. Cek dengan titik ekstrem ketiga bila terlihat. Dua garis selalu berpotongan, walau bidikannya meleset. Garis ketiga membentuk segitiga galat: makin kecil segitiganya, makin teliti bidikanmu.',
+      '5. Tandai posisimu di peta, yaitu titik potong garis (di dalam segitiga galat), lalu kirim.',
     ];
     this.objectives = [
       { text: 'Utarakan peta', done: false },
       { text: 'Titik ekstrem 1: bidik, pasangkan, back azimuth, gariskan', done: false },
       { text: 'Titik ekstrem 2: bidik, pasangkan, back azimuth, gariskan', done: false },
+      { text: 'Cek titik ekstrem 3 (segitiga galat)', done: false, optional: true },
       { text: 'Tandai posisimu di peta (perpotongan garis)', done: false },
     ];
   }
@@ -315,14 +336,15 @@ class Resection extends Mission {
     for (const r of rs) if (r.pairedWith >= 0 && !symbols.includes(r.pairedWith)) symbols.push(r.pairedWith);
     const hits = rs.filter((r) => r.target >= 0).length;
     const tick = (b: boolean) => (b ? '✓' : '○');
-    for (let k = 0; k < 2; k++) {
+    for (let k = 0; k < 3; k++) {
       const id = symbols[k];
       const l = id === undefined ? undefined : this.c.w.landmarks[id];
       const aimed = hits > k || id !== undefined;
       const paired = id !== undefined;
       const back = paired && rs.some((r) => r.pairedWith === id && r.backTyped !== null && Math.abs(r.backTyped - backAzimuth(r.azimuth)) < 0.5);
       const line = !!l && this.linesFrom([l.x, l.z]).length > 0;
-      o[1 + k].text = `Titik ekstrem ${k + 1}${l ? ` (${l.name})` : ''}: bidik ${tick(aimed)} pasang ${tick(paired)} back az ${tick(back)} garis ${tick(line)}`;
+      const name = k === 2 ? 'Cek titik ekstrem 3' : `Titik ekstrem ${k + 1}`;
+      o[1 + k].text = `${name}${l ? ` (${l.name})` : ''}: bidik ${tick(aimed)} pasang ${tick(paired)} back az ${tick(back)} garis ${tick(line)}`;
       // Once a step is done it stays done: erasing a line to redraw it is normal map work.
       o[1 + k].done ||= aimed && paired && back && line;
     }
@@ -335,19 +357,83 @@ class Resection extends Mission {
   private async submit() {
     const m = await this.markMyPosition();
     if (!m || this.result) return;
-    this.objectives[3].done = true;
+    this.objectives[4].done = true;
     const errM = M(m.err);
-    this.revealTruth([this.c.player.x, this.c.player.z], m.p, `Posisi sebenarnya (galat ${errM} m)`);
+    const truth = here(this.c);
+    const checks = this.lineChecks(truth);
+    // The true line from each landmark through the real position, next to the player's own line.
+    for (const k of checks) this.c.map.reveals.push({ x: truth[0], z: truth[1], from: [k.l.x, k.l.z], label: '', color: '#1d8a3a', dot: false });
+    this.revealTruth(truth, m.p, `Posisi sebenarnya (galat ${errM} m)`);
     this.crossingTip();
     if (!this.objectives[0].done) this.lessons.push('Peta belum diutarakan. Utarakan peta dulu, supaya arah di peta sama dengan arah di medan dan titik ekstrem mudah dikenali.');
     const p = this.pairs();
     if (p.wrong) this.lessons.push('Ada bidikan yang dipasangkan dengan simbol yang salah, sehingga garisnya berangkat dari tempat yang salah.');
+    this.sightingLessons(checks);
+    const tri = this.errorTriangle(checks);
+    if (tri !== null) {
+      this.lessons.push(tri <= 40
+        ? `Tiga garismu membentuk segitiga galat kecil (sisi terpanjang ${tri} m): ketiga bidikan saling menguatkan, dan posisimu ada di dalam atau dekat segitiga itu.`
+        : `Tiga garismu membentuk segitiga galat besar (sisi terpanjang ${tri} m): ada bidikan yang meleset. Di lapangan, bidik ulang titik ekstrem yang garisnya paling jauh dari dua garis lainnya.`);
+    } else {
+      this.lessons.push('Bila ada titik ekstrem ketiga yang terlihat, pakai untuk mengecek. Dua garis selalu berpotongan, jadi bidikan yang meleset tidak kelihatan. Tiga garis membentuk segitiga galat yang menunjukkan seberapa teliti bidikanmu.');
+    }
     this.lessons.push('Resection = mencari posisi diri sendiri, memakai BACK AZIMUTH dari titik ekstrem yang diketahui.');
     const passed = errM <= 100;
-    this.finish(passed, 60 * clamp01(1 - errM / 150) + this.azScore(25) + this.timeScore(15), [
+    const stats: [string, string][] = [
       ['Galat posisi', `${errM} m`],
       ['Batas lulus', '100 m'],
-    ]);
+    ];
+    for (const k of checks) {
+      const line = k.missM === null ? 'belum digaris' : `garismu lewat ${k.missM} m dari posisimu`;
+      stats.push([`Garis ${k.l.name}`, `bidikan ${deg(k.r.azimuth)}, benar ${deg(k.trueAz)}: meleset ${k.errDeg.toFixed(1)}° ≈ ${k.shiftM} m pada jarak ${k.distM} m; ${line}`]);
+    }
+    stats.push(['Segitiga galat', tri === null ? 'tidak dicek (perlu 3 garis)' : `sisi terpanjang ${tri} m`]);
+    this.finish(passed, 60 * clamp01(1 - errM / 150) + this.azScore(25) + this.timeScore(15), stats);
+  }
+
+  /**
+   * Per correctly paired landmark (in pairing order): the sighting error, how far that error shifts the
+   * line at the player's distance, and how far the player's drawn line actually passes from the truth.
+   */
+  private lineChecks(truth: P) {
+    const out: { l: Landmark; r: Reading; line: MapLine | null; trueAz: number; errDeg: number; distM: number; shiftM: number; missM: number | null }[] = [];
+    const seen = new Set<number>();
+    for (const r of this.c.notebook.readings) {
+      if (r.pairedWith < 0 || r.pairedWith !== r.target || seen.has(r.pairedWith)) continue;
+      seen.add(r.pairedWith);
+      // the latest reading of this landmark counts (the player may have re-sighted it)
+      const last = [...this.c.notebook.readings].reverse().find((q) => q.pairedWith === r.pairedWith && q.target === r.pairedWith)!;
+      const l = this.c.w.landmarks[r.pairedWith];
+      const lines = this.linesFrom([l.x, l.z]);
+      const line = lines.length ? lines[lines.length - 1] : null;
+      const trueAz = magneticOf(azimuthTo(last.x, last.z, l.x, l.z));
+      const errDeg = Math.abs(angleDiff(last.azimuth, trueAz));
+      const d = dist([last.x, last.z], [l.x, l.z]);
+      out.push({ l, r: last, line, trueAz, errDeg, distM: M(d), shiftM: M(d * Math.sin((errDeg * Math.PI) / 180)), missM: line ? M(rayMiss(line, truth)) : null });
+    }
+    return out;
+  }
+
+  /** Makes the cost of a few degrees visible: worst sighting error in metres, or a drawing problem. */
+  private sightingLessons(checks: ReturnType<Resection['lineChecks']>) {
+    if (!checks.length) return;
+    const worst = checks.reduce((a, b) => (b.shiftM > a.shiftM ? b : a));
+    if (worst.errDeg >= 1) {
+      this.lessons.push(`Bidikan ke ${worst.l.name} meleset ${worst.errDeg.toFixed(1)}°. Pada jarak ${worst.distM} m, selisih sekecil itu menggeser garis sekitar ${worst.shiftM} m. Aturan praktis: galat 1° ≈ 17 m untuk setiap 1 km jarak, jadi makin jauh titik ekstrem, makin teliti bidikan harus.`);
+    } else {
+      this.lessons.push('Semua bidikanmu teliti (galat di bawah 1°). Ingat: galat 1° saja menggeser garis sekitar 17 m untuk setiap 1 km jarak ke titik ekstrem.');
+    }
+    const drawn = checks.find((k) => k.missM !== null && k.missM > k.shiftM + 25);
+    if (drawn) this.lessons.push(`Garis dari ${drawn.l.name} lewat ${drawn.missM} m dari posisimu, lebih jauh dari yang disebabkan bidikannya. Periksa back azimuth dan cara meletakkan busur saat menggaris.`);
+  }
+
+  /** Longest side (m) of the triangle formed by the first three drawn lines, or null if fewer than three. */
+  private errorTriangle(checks: ReturnType<Resection['lineChecks']>): number | null {
+    const ls = checks.map((k) => k.line).filter((l): l is MapLine => l !== null).slice(0, 3);
+    if (ls.length < 3) return null;
+    const a = rayCross(ls[0], ls[1]), b = rayCross(ls[1], ls[2]), c = rayCross(ls[2], ls[0]);
+    if (!a || !b || !c) return null;
+    return M(Math.max(dist(a, b), dist(b, c), dist(c, a)));
   }
 
   devInfo(): [string, string][] {

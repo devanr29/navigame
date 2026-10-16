@@ -11,7 +11,7 @@ export type P = [number, number];
 export interface Sites {
   /** Level 2: open spot where at least three landmarks are visible. */
   orient: P;
-  /** Level 3: open spot off the trails where two landmarks cross at a good angle. */
+  /** Level 3: open spot off the trails where two landmarks cross at a good angle (a third in view if possible). */
   resection: P;
   /** Level 5: navter route along trails through two crossroads. */
   route: { start: P; dest: P; crossroads: P[] };
@@ -112,9 +112,10 @@ export function findSites(w: WorldData): Sites {
   };
   const dist = (a: P, b: P) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+  // Prefer a spot with a third landmark in view, for the optional triangle-of-error check.
   const resection = pickSpot(
     (s) => s.q >= 45 && !nearSurface(s.x, s.z, 14, Surface.Path),
-    (s) => s.q + rng() * 8,
+    (s) => s.q + (s.ids.length >= 3 ? 25 : 0) + rng() * 8,
     w.spawn,
   );
   const orient = pickSpot(
