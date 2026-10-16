@@ -213,9 +213,16 @@ const levels = {
     for (const j of route.crossroads) {
       await page.evaluate((j) => T.g.player.teleport(j[0] + 2, j[1] + 2, 0), j);
       await page.waitForTimeout(800);
-      await markHere();
+      await clickAction(page, 'Cek persimpangan');
+      await tapSheet(page, j[0], j[1]);
+      await page.getByRole('button', { name: 'Kirim' }).click();
+      await page.waitForTimeout(300);
     }
+    // reporting arrival away from the post does not end the mission
+    await clickAction(page, 'Lapor tiba');
     await page.evaluate((d) => T.g.player.teleport(d[0] + 1, d[1] + 1, 0), route.dest);
+    await page.waitForTimeout(300);
+    await clickAction(page, 'Lapor tiba');
     const r = await waitResult(page, 3000);
     return { objectives: await page.evaluate(() => T.objectives()), notes: await page.evaluate(() => T.g.notebook.notes), result: r };
   },

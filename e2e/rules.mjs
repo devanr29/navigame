@@ -46,11 +46,12 @@ await debrief();
 await enter(5);
 const dest = await g(() => {
   const m = window.__game.mission;
-  m.checked = m.checked.map(() => true);
+  m.checked = m.checked.map(() => 0);
   m.checked.forEach((_, k) => { m.objectives[3 + k].done = true; });
   return window.__game.sites.route.dest;
 });
 await teleport(dest);
+await g(() => window.__game.mission.actions().find((a) => a.id === 'arrive').run());
 let r = await debrief();
 check('L5 without starting resection fails', /Belum lulus/.test(r.title), r.title);
 check('L5 explains the missing resection', /Resection di titik awal tidak dilakukan/.test(r.text));

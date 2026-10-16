@@ -89,11 +89,12 @@ await g(async () => {
   for (const j of r.crossroads) {
     G.player.teleport(j[0] + 1, j[1] + 1, 0);
     await new Promise((res) => setTimeout(res, 300));
-    G.mission.checked = G.mission.checked.map(() => true);
+    G.mission.checked = G.mission.checked.map(() => 0);
   }
   // the starting resection (objective 2) is required to pass, like the crossroads checks
   G.mission.objectives.forEach((o, k) => { if (k === 1 || k >= 3) o.done = true; });
   G.player.teleport(r.dest[0] + 1, r.dest[1] + 1, 0);
+  G.mission.actions().find((a) => a.id === 'arrive').run();
 });
 await page.waitForSelector('.score', { timeout: 15000 });
 check('level 5 debrief', /Berhasil/.test(await page.locator('h2').textContent()), await page.locator('h2').textContent());

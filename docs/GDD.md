@@ -38,7 +38,7 @@ A mission starts in navter (navbuk). When the route leads into woods where no la
 
 *[Diagram: mission flow · shared start, navter and navtup branches]*
 
-Navter loops back to resection at every crossroad. Navtup has no such loop, because there is nothing to sight, so the team relies on the locked bearing and the pace count.
+Navter loops back to a position check at every crossroad (matching the junction to the map). Navtup has no such loop, because there is nothing to sight, so the team relies on the locked bearing and the pace count.
 
 ## World design
 
@@ -147,7 +147,7 @@ In early levels these are guided tutorials. In later levels they are quick check
 
 ## Phase B1: Navigasi terbuka (navter)
 
-In navter, landmarks are visible, so the player fixes their position by resection, follows a track, and repeats resection at every crossroad to confirm they are on the right path.
+In navter, landmarks are visible, so the player fixes their position by resection, follows a track, and checks their position at every crossroad to confirm they are on the right path.
 
 **1. Utarakan peta.** Take a compass reading, then rotate the map until its north arrow matches compass north. The game shows how many degrees off the map is; it counts as oriented within a small tolerance.
 
@@ -165,7 +165,9 @@ The game then reveals the true position and the error in metres. A tip appears w
 
 **4. Plan the track.** Draw the route along trails from the fixed position to the destination, noting each crossroad on the way.
 
-**5. Walk and check at every crossroad.** Each crossroad is a checkpoint. The player stops, does a quick resection, and confirms which branch to take. Skipping a check is allowed; a wrong branch is only discovered at the next check (see "Error recovery").
+**5. Walk and check at every crossroad.** Each crossroad is a checkpoint. A junction is already on the map, so no resection is needed: the player stops, counts the branches, sights the branch directions, and marks on the map which junction this is (Cek persimpangan). The check is scored in the debrief by whether the right junction was marked. Checking a junction restarts the pace count. Skipping a check is allowed; a wrong branch is only discovered at the next check (see "Error recovery").
+
+**5a. Arrive at the destination.** The destination is a physical post (pos). Where no feature marks the last stretch, the player measures the distance from the last crossroad on the map and paces it off, then reports arrival (Lapor tiba). Reporting away from the post is refused and costs points.
 
 **6. Intersection missions: find where something is.** The briefing describes an object seen from the field, such as smoke from a fire, a crash site, or a hut.
 
@@ -227,7 +229,7 @@ In navtup there are no landmarks to confirm progress, so distance must be counte
 
 The game lets players make mistakes and teaches what to do next.
 
-- **Navter, wrong branch at a crossroad:** the next checkpoint's resection doesn't match the plan. The player stops, fixes their real position, then either returns to the last confirmed crossroad or re-plans from where they are.
+- **Navter, wrong branch at a crossroad:** the next junction doesn't match the plan (wrong number or direction of branches). The player stops, fixes their real position, then either returns to the last confirmed crossroad or re-plans from where they are.
 - **Navtup, obstacle on the bearing** (cliff, river, swamp): the player detours around it while keeping the bearing. Turn 90°, pace a set distance; turn back to the bearing and pace past the obstacle; turn 90° the other way and pace the same distance back; resume the original bearing. Steps paced along the bearing still count toward the leg.
 - **Navtup, nothing found at the end of the leg:** the player searches in a small pattern around the expected point, or follows the stringline back to the last confirmed position and tries again.
 
@@ -241,7 +243,7 @@ Ten levels introduce one new skill at a time and end with a combined navter-to-n
 | 2 | Orienting | Utarakan peta, orientasi medan | Map oriented within tolerance; 3 landmarks paired correctly |
 | 3 | Resection | Compass sighting, back azimuth, line drawing | Position error under a set distance |
 | 4 | Intersection | Azimuth from two known points | Object located within a set distance |
-| 5 | Navter route | Track planning, crossroad checks | Reach destination; every crossroad checked |
+| 5 | Navter route | Track planning, crossroad checks | Report arrival at the post; every crossroad identified correctly |
 | 6 | Declination | Non-zero declination | Corrected route reaches the target |
 | 7 | Pacing | Pace-count calibration | Paced 300 m within tolerance |
 | 8 | Navtup | Plotting, kunci kompas, four roles, stringline | Reach the target through dense forest |

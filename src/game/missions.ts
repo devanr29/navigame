@@ -551,31 +551,39 @@ class Intersection extends Mission {
 // ======================================================================= level 5: navter route
 
 class Route extends Mission {
-  private checked: boolean[] = [];
+  /** Per crossroad: blocks between the player's junction mark and the real junction, null = not checked. */
+  private checked: (number | null)[] = [];
   private announced: boolean[] = [];
   private startErr: number | null = null;
+  /** "Lapor tiba" pressed away from the post. */
+  private falseReports = 0;
+  /** A mark within this many blocks (25 m) identifies the junction; junctions are 100+ blocks apart. */
+  private static readonly JUNCTION_OK = 10;
 
   start() {
     const { sites, player } = this.c;
     const r = sites.route;
     const j = r.crossroads[0];
     player.teleport(r.start[0], r.start[1], azimuthTo(r.start[0], r.start[1], j[0], j[1]));
+    this.place(targetPost(), r.dest);
     this.destination = { p: r.dest, label: 'Tujuan' };
     this.orientCheck = true;
+    this.showPace = true;
     this.par = 900;
-    this.checked = r.crossroads.map(() => false);
+    this.checked = r.crossroads.map(() => null);
     this.announced = r.crossroads.map(() => false);
     this.briefing = [
-      `Tujuanmu ada di ${fmtCoord(r.dest)}, di tepi jalan. Tandai di peta sebelum berangkat.`,
-      'Mulailah dengan resection untuk memastikan posisi awal. Rencanakan jalur lewat jalan (garis ganda kuning di peta) dan jalan setapak, lalu catat persimpangan yang akan dilewati.',
-      'Di setiap persimpangan, berhenti dan cek posisi (Tandai posisiku) sebelum memilih cabang. Salah cabang baru ketahuan di pengecekan berikutnya.',
+      `Tujuanmu pos bendera oranye di ${fmtCoord(r.dest)}, di tepi jalan. Tandai di peta sebelum berangkat.`,
+      'Mulailah dengan resection untuk memastikan posisi awal. Rencanakan jalur lewat jalan (garis ganda kuning di peta) dan jalan setapak, lalu catat persimpangan yang akan dilewati dan jarak antar persimpangan.',
+      'Persimpangan sudah ada di peta, jadi tidak perlu resection di sana. Cocokkan dengan peta: hitung cabangnya dan bidik arah cabang, lalu tekan Cek persimpangan dan tandai di peta persimpangan yang mana. Salah mengenali persimpangan berarti salah cabang.',
+      `Dari persimpangan terakhir, ukur jarak ke pos di peta, lalu hitung langkah (sekitar ${DEFAULT_PACE} langkah per 100 m). Hitungan langkah dimulai ulang setiap kali persimpangan dicek. Tekan Lapor tiba saat sampai di pos.`,
     ];
     this.objectives = [
       { text: 'Utarakan peta', done: false },
       { text: 'Resection di titik awal (Tandai posisiku)', done: false },
       { text: 'Rencanakan jalur dengan pensil', done: false, optional: true },
-      ...r.crossroads.map((_, k) => ({ text: `Cek posisi di persimpangan ${k + 1}`, done: false })),
-      { text: 'Sampai di tujuan', done: false },
+      ...r.crossroads.map((_, k) => ({ text: `Cek persimpangan ${k + 1} (cocokkan dengan peta)`, done: false })),
+      { text: 'Lapor tiba di pos tujuan', done: false },
     ];
   }
 
@@ -589,62 +597,96 @@ class Route extends Mission {
     sites.route.crossroads.forEach((j, k) => {
       if (!this.announced[k] && dist([player.x, player.z], j) < 12) {
         this.announced[k] = true;
-        this.c.toast('Persimpangan!', ['Berhenti dan cek posisi dengan resection (Tandai posisiku) sebelum memilih cabang.']);
+        this.c.toast('Persimpangan!', ['Berhenti. Hitung cabangnya, bidik arah cabang, lalu Cek persimpangan sebelum memilih cabang.']);
       }
     });
-    if (dist([player.x, player.z], sites.route.dest) < 15) {
-      o[o.length - 1].done = true;
-      const n = this.checked.filter(Boolean).length;
-      const all = n === this.checked.length;
-      const started = o[1].done;
-      if (!all) this.lessons.push('Ada persimpangan yang dilewati tanpa cek posisi. Di lapangan, salah cabang paling mudah terjadi di persimpangan.');
-      if (!started) this.lessons.push('Resection di titik awal tidak dilakukan. Navigasi terbuka dimulai dengan memastikan posisi awal sebelum berangkat.');
-      if (this.startErr !== null && this.startErr > 100) this.lessons.push(`Resection awal meleset ${this.startErr} m; perbaiki dengan memilih titik ekstrem yang berselisih arah mendekati 90°.`);
-      this.lessons.push('Navigasi terbuka: posisi dipastikan dengan resection di titik awal dan di setiap persimpangan.');
-      this.finish(all && started, 40 + 35 * (n / this.checked.length) + this.timeScore(25), [
-        ['Persimpangan dicek', `${n} dari ${this.checked.length}`],
-        ['Galat resection awal', this.startErr === null ? '—' : `${this.startErr} m`],
-      ]);
-    }
   }
 
   actions(): Action[] {
-    return [{ id: 'mark', label: 'Tandai posisiku', primary: true, run: () => void this.check() }];
+    return [
+      { id: 'mark', label: 'Tandai posisiku', run: () => void this.resect() },
+      { id: 'junction', label: 'Cek persimpangan', run: () => void this.checkJunction() },
+      { id: 'arrive', label: 'Lapor tiba', primary: true, run: () => this.arrive() },
+    ];
   }
 
-  private async check() {
+  private async resect() {
     const m = await this.markMyPosition('Tandai posisimu dari hasil resection, lalu Kirim');
     if (!m || this.result) return;
-    const { player, sites } = this.c;
-    const here: P = [player.x, player.z];
-    if (dist(here, sites.route.start) < 25 && !this.objectives[1].done) {
+    if (dist(here(this.c), this.c.sites.route.start) < 25 && !this.objectives[1].done) {
       this.objectives[1].done = true;
       this.startErr = M(m.err);
-      this.c.notebook.notes.push(`Resection awal ditandai.`);
+      this.c.notebook.notes.push('Resection awal ditandai.');
     }
-    sites.route.crossroads.forEach((j, k) => {
-      if (dist(here, j) < 15 && !this.checked[k]) {
-        this.checked[k] = true;
-        this.objectives[3 + k].done = true;
-        this.c.notebook.notes.push(`Persimpangan ${k + 1}: posisi dicek.`);
-        this.c.toast(`Persimpangan ${k + 1} dicek`, ['Bandingkan posisimu dengan rencana jalur, lalu pilih cabang.']);
-      }
+  }
+
+  /** At a junction the player marks which junction on the map it is; no resection needed on a known feature. */
+  private async checkJunction() {
+    const h = here(this.c), js = this.c.sites.route.crossroads;
+    let k = -1;
+    js.forEach((j, i) => { if (dist(h, j) < 15 && (k < 0 || dist(h, j) < dist(h, js[k]))) k = i; });
+    if (k < 0) {
+      this.c.toast('Belum di persimpangan', ['Cek persimpangan dilakukan saat berdiri di persimpangan jalan.']);
+      return;
+    }
+    const p = await this.c.askMark('Tandai di peta persimpangan tempatmu berdiri, lalu Kirim');
+    if (!p || this.result) return;
+    this.c.map.marks.push({ x: p[0], z: p[1], label: 'Persimpangan', pen: !this.c.tools.has('pensil') });
+    this.checked[k] = dist(p, js[k]);
+    this.objectives[3 + k].done = true;
+    this.c.pace.reset();
+    this.c.notebook.notes.push(`Persimpangan dicek di ${fmtCoord(p)}. Hitungan langkah mulai dari sini.`);
+    this.c.toast('Persimpangan dicek', ['Hitungan langkah dimulai ulang. Pilih cabang sesuai rencana jalur.']);
+  }
+
+  private arrive() {
+    if (this.result) return;
+    const r = this.c.sites.route;
+    if (dist(here(this.c), r.dest) > 8) {
+      this.falseReports++;
+      this.c.toast('Pos tujuan tidak ada di sini', ['Cek lagi jarak dari persimpangan terakhir dengan hitungan langkahmu.']);
+      return;
+    }
+    const o = this.objectives;
+    o[o.length - 1].done = true;
+    const ok = this.checked.map((e) => e !== null && e <= Route.JUNCTION_OK);
+    const n = ok.filter(Boolean).length;
+    const started = o[1].done;
+    this.checked.forEach((e, k) => {
+      const j = r.crossroads[k];
+      if (e === null) this.lessons.push(`Persimpangan ${k + 1} dilewati tanpa dicek. Di lapangan, salah cabang paling mudah terjadi di persimpangan.`);
+      else if (e > Route.JUNCTION_OK) this.lessons.push(`Persimpangan ${k + 1} ditandai ${M(e)} m dari letak sebenarnya: persimpangan salah dikenali. Cocokkan jumlah cabang dan arah tiap cabang dengan peta.`);
+      this.c.map.reveals.push({ x: j[0], z: j[1], label: `Persimpangan ${k + 1}`, color: '#1d8a3a' });
     });
+    if (!started) this.lessons.push('Resection di titik awal tidak dilakukan. Navigasi terbuka dimulai dengan memastikan posisi awal sebelum berangkat.');
+    if (this.startErr !== null && this.startErr > 100) this.lessons.push(`Resection awal meleset ${this.startErr} m; perbaiki dengan memilih titik ekstrem yang berselisih arah mendekati 90°.`);
+    if (this.falseReports) this.lessons.push(`${this.falseReports} kali lapor tiba sebelum sampai di pos. Ukur jarak dari persimpangan terakhir di peta dan hitung langkah sampai jarak itu habis.`);
+    this.lessons.push('Navigasi terbuka: resection di titik awal, lalu persimpangan dan hitungan langkah sebagai titik cek di sepanjang jalan.');
+    this.c.map.redraw();
+    this.finish(n === ok.length && started, 40 + 35 * (n / ok.length) + this.timeScore(25) - 5 * this.falseReports, [
+      ['Persimpangan dikenali benar', `${n} dari ${ok.length}`],
+      ['Galat resection awal', this.startErr === null ? '—' : `${this.startErr} m`],
+      ['Lapor tiba terlalu awal', String(this.falseReports)],
+    ]);
   }
 
   devInfo(): [string, string][] {
     const r = this.c.sites.route, h = here(this.c);
     return [
       ['Jarak ke titik awal', `${M(dist(h, r.start))} m (resection awal dihitung <63 m)`],
-      ...r.crossroads.map((j, k): [string, string] => [`Persimpangan ${k + 1}`, `${M(dist(h, j))} m · ${this.checked[k] ? 'dicek' : 'belum dicek'} (cek <38 m)`]),
-      ['Jarak ke tujuan', `${M(dist(h, r.dest))} m (selesai <38 m)`],
+      ...r.crossroads.map((j, k): [string, string] => {
+        const e = this.checked[k];
+        return [`Persimpangan ${k + 1}`, `${M(dist(h, j))} m · ${e === null ? 'belum dicek' : `tanda meleset ${M(e)} m (benar ≤${M(Route.JUNCTION_OK)} m)`} (cek <38 m)`];
+      }),
+      ['Jarak ke pos tujuan', `${M(dist(h, r.dest))} m (lapor tiba ≤20 m)`],
+      ['Langkah sejak cek terakhir', `${Math.round(this.c.pace.steps)} (${Math.round(this.c.pace.metres)} m)`],
       ['Galat resection awal', this.startErr === null ? '—' : `${this.startErr} m`],
     ];
   }
 
   devPoints() {
     const r = this.c.sites.route;
-    return [{ label: 'Titik awal', p: r.start }, ...r.crossroads.map((p, k) => ({ label: `Persimpangan ${k + 1}`, p })), { label: 'Tujuan', p: r.dest }];
+    return [{ label: 'Titik awal', p: r.start }, ...r.crossroads.map((p, k) => ({ label: `Persimpangan ${k + 1}`, p })), { label: 'Pos tujuan', p: r.dest }];
   }
 }
 
