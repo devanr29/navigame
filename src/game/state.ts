@@ -65,10 +65,12 @@ export interface Progress {
 }
 
 const KEY = 'navigame-progress-v1';
+/** Developer mode keeps its own progress, so testing never touches a student's saved levels. */
+export const DEV_KEY = 'navigame-progress-dev';
 
-export function loadProgress(): Progress {
+export function loadProgress(key = KEY): Progress {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(key);
     if (raw) {
       const p = JSON.parse(raw) as Progress;
       if (typeof p.unlocked === 'number') return { unlocked: p.unlocked, best: p.best ?? {}, paceCount: p.paceCount ?? null };
@@ -79,9 +81,9 @@ export function loadProgress(): Progress {
   return { unlocked: 1, best: {}, paceCount: null };
 }
 
-export function saveProgress(p: Progress) {
+export function saveProgress(p: Progress, key = KEY) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(p));
+    localStorage.setItem(key, JSON.stringify(p));
   } catch {
     // ignore
   }

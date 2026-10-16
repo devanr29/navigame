@@ -91,7 +91,8 @@ await g(async () => {
     await new Promise((res) => setTimeout(res, 300));
     G.mission.checked = G.mission.checked.map(() => true);
   }
-  G.mission.objectives.forEach((o, k) => { if (k >= 3) o.done = true; });
+  // the starting resection (objective 2) is required to pass, like the crossroads checks
+  G.mission.objectives.forEach((o, k) => { if (k === 1 || k >= 3) o.done = true; });
   G.player.teleport(r.dest[0] + 1, r.dest[1] + 1, 0);
 });
 await page.waitForSelector('.score', { timeout: 15000 });

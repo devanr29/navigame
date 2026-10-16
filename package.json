@@ -11,7 +11,8 @@
     "test": "vitest run",
     "e2e": "node e2e/play.mjs",
     "e2e:tools": "node e2e/tools.mjs",
-    "e2e:flow": "node e2e/flow.mjs"
+    "e2e:flow": "node e2e/flow.mjs",
+    "e2e:dev": "node e2e/dev.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"

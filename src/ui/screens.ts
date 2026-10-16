@@ -53,7 +53,8 @@ export class Screens {
     });
   }
 
-  levels(levels: LevelInfo[], p: Progress): Promise<number> {
+  /** `extra` is shown above the grid (developer mode options). */
+  levels(levels: LevelInfo[], p: Progress, extra?: Node): Promise<number> {
     return new Promise((resolve) => {
       const grid = el('div', 'level-grid');
       for (const L of levels) {
@@ -72,6 +73,7 @@ export class Screens {
       this.show(el('div', 'screen-wrap',
         el('h2', '', 'Pilih level'),
         el('p', 'muted', 'Setiap level menambah satu keterampilan. Selesaikan level untuk membuka level berikutnya.'),
+        extra,
         grid,
         p.paceCount ? el('p', 'muted small', `Kalibrasi langkahmu: ${p.paceCount} langkah per 100 m.`) : null,
       ));

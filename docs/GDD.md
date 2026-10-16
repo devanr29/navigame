@@ -55,7 +55,8 @@ The world and the map come from one seeded heightmap, so every contour, ridge an
 
 - Peaks and saddles, lembahan and punggungan, rivers and river junctions.
 - A trail and road network with bends and crossroads, used for navter routes.
-- Titik ekstrem: peaks, a radio tower, a hut, a bridge, a distinctive lone tree, road bends, junctions. Each one appears on the map with its own symbol.
+- Titik ekstrem: peaks (puncak, including a named summit in the far corner from the forest), a radio tower, a hut, a bridge, road bends, junctions. Each one appears on the map with its own symbol. Trees are not titik ekstrem.
+- Roads (jalan): the through-route from the west edge over both crossroads and the bridge to the south edge is a road, wider than a footpath, with a gravel surface in the world and a double line on the map. The branches stay footpaths (jalan setapak). The road gives a clear line to plan a navter route along.
 
 **Visibility is the switch between the two navigation types:**
 

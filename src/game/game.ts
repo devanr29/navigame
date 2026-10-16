@@ -1,6 +1,7 @@
 // Runs the game after the world is generated: menus → packing → quiz → briefing → destination → field
 // mission → debrief. Owns the 3D view, the HUD and the tools.
 import * as THREE from 'three';
+import { DevTools } from '../dev/devtools';
 import { Zone, type WorldData } from '../gen/constants';
 import { makeRng } from '../gen/noise';
 import { MapView } from '../map/mapView';
@@ -19,7 +20,7 @@ import { createMission, fmtCoord, LEVELS, type Action, type Ctx, type Mission } 
 import { DEFAULT_PACE, PaceCounter } from './pace';
 import { makeQuestion, type Question } from './quiz';
 import type { P, Sites } from './sites';
-import { ALL_TOOLS, loadProgress, saveProgress, TOOLS, type Reading, type ToolId } from './state';
+import { ALL_TOOLS, DEV_KEY, loadProgress, saveProgress, TOOLS, type Reading, type ToolId } from './state';
 import { Team } from './team';
 
 // View distances in blocks (1 block = 2.5 m). Open terrain: 1.4 km, nearly the whole 1.5 km sheet,
@@ -37,6 +38,9 @@ export interface GameOptions {
   debug: boolean;
   /** Developer testing: jump straight into a level with every tool, skipping the menus. */
   debugLevel: number | null;
+  /** Developer mode (/developer): every level open, flight, exact position, mission inspector. */
+  dev: boolean;
+  seed: string;
   logoUrl: string;
 }
 
@@ -55,7 +59,10 @@ export class Game {
   private team: Team;
   private pace = new PaceCounter();
   private screens: Screens;
-  private progress = loadProgress();
+  private progress: ReturnType<typeof loadProgress>;
+  private devtools: DevTools | null = null;
+  /** Developer mode: skip packing, quiz, briefing and destination marking (all tools packed). */
+  private devQuick = false;
   private arm = makeFirstPersonArm();
   /** The player's own body, seen in the third-person view. */
   private body = makeCharacter('compasman');
@@ -80,6 +87,7 @@ export class Game {
   private toastTimer = 0;
 
   constructor(private w: WorldData, private sites: Sites, private opts: GameOptions) {
+    this.progress = loadProgress(opts.dev ? DEV_KEY : undefined);
     const canvas = $<HTMLCanvasElement>('view');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.maxPR = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -119,7 +127,8 @@ export class Game {
 
     this.bindHud();
     // Developer testing only: automated test scripts read and drive the game through this handle.
-    if (opts.debug) (window as unknown as { __game: Game }).__game = this;
+    if (opts.debug || opts.dev) (window as unknown as { __game: Game }).__game = this;
+    if (opts.dev) this.devtools = this.makeDevTools();
     window.addEventListener('resize', () => {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -130,6 +139,7 @@ export class Game {
       requestAnimationFrame(frame);
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
+      this.devtools?.tick(dt);
       if (this.mode === 'field' && !document.hidden) {
         if (!this.mapOpen) this.fieldFrame(dt, now);
         // While the map is open the world is paused, but the mission keeps checking objectives
@@ -166,7 +176,9 @@ export class Game {
     }
     await this.screens.title();
     for (;;) {
-      const n = await this.screens.levels(LEVELS, this.progress);
+      const n = this.opts.dev
+        ? await this.screens.levels(LEVELS, { ...this.progress, unlocked: 10 }, this.devLevelOptions())
+        : await this.screens.levels(LEVELS, this.progress);
       await this.playLevel(n);
     }
   }
@@ -182,7 +194,7 @@ export class Game {
 
   private async playOnce(n: number): Promise<'retry' | 'next' | 'menu'> {
     const info = LEVELS[n - 1];
-    const quickDebug = this.opts.debugLevel === n;
+    const quickDebug = this.opts.debugLevel === n || this.devQuick;
     const rnd = makeRng((Date.now() & 0xffffff) ^ (n * 7919));
     const packed = quickDebug ? { tools: new Set(ALL_TOOLS), extras: [] } : await this.screens.packing(info, n >= 3, rnd);
     this.tools = packed.tools;
@@ -216,6 +228,7 @@ export class Game {
         ],
       };
       this.recordResult(n, result.passed, result.score);
+      this.devtools?.quizEnded(result);
       return this.screens.debrief(info, result, missing, n < 10, () => this.peekMap());
     }
 
@@ -224,6 +237,7 @@ export class Game {
     const mission = createMission(n, ctx)!;
     this.mission = mission;
     mission.start();
+    this.devtools?.missionStarted(mission, n);
     this.map.redraw();
 
     if (!quickDebug) {
@@ -247,6 +261,7 @@ export class Game {
     const r = mission.result!;
     r.lessons.unshift(...extraLessons);
     this.recordResult(n, r.passed, r.score);
+    this.devtools?.missionEnded(n, r);
     const out = await this.screens.debrief(info, r, missing, n < 10, () => this.peekMap());
     mission.cleanup();
     this.mission = null;
@@ -256,7 +271,7 @@ export class Game {
   private recordResult(n: number, passed: boolean, score: number) {
     if (passed) this.progress.unlocked = Math.max(this.progress.unlocked, Math.min(10, n + 1));
     this.progress.best[n] = Math.max(this.progress.best[n] ?? 0, score);
-    saveProgress(this.progress);
+    saveProgress(this.progress, this.opts.dev ? DEV_KEY : undefined);
   }
 
   /** Shows the map over a menu screen (read-only use: quiz, debrief). */
@@ -292,7 +307,7 @@ export class Game {
       scene: this.scene,
       tools: this.tools,
       progress: this.progress,
-      saveProgress: () => saveProgress(this.progress),
+      saveProgress: () => saveProgress(this.progress, this.opts.dev ? DEV_KEY : undefined),
       toast: (t, l) => this.toast(t, l ?? []),
       askMark: (prompt) => this.askMark(prompt),
       askNumbers: (title, fields) => {
@@ -431,7 +446,7 @@ export class Game {
       const a = H[z0 * N + x0], b = H[z0 * N + x0 + 1], c = H[(z0 + 1) * N + x0], d = H[(z0 + 1) * N + x0 + 1];
       return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
     };
-    if (m?.showPace) {
+    if (m?.showPace && !player.flying) {
       const brush = this.w.zone[Math.floor(player.z) * N + Math.floor(player.x)] === Zone.Forest;
       this.pace.add(player.moved, hf(player.x, player.z) - hf(this.paceX, this.paceZ), brush, player.sprinting);
     }
@@ -531,7 +546,7 @@ export class Game {
     this.renderer.setPixelRatio(this.pixelRatio);
     const info = this.renderer.info.render;
     $('fps').textContent = `${Math.round(fps)} fps · res ${this.pixelRatio.toFixed(2)}x` +
-      (this.opts.debug ? ` · ${info.calls} draws · ${Math.round(info.triangles / 1000)}k tris` : '');
+      (this.opts.debug || this.opts.dev ? ` · ${info.calls} draws · ${Math.round(info.triangles / 1000)}k tris` : '');
     this.frames = 0;
     this.fpsTime = 0;
   }
@@ -617,6 +632,7 @@ export class Game {
       const inField = this.mode === 'field';
       this.map.orientFacing = this.mission?.orientCheck && inField ? azimuthOfYaw(this.player.yaw) : null;
       this.map.heading = inField && this.tools.has('kompas') ? magneticOf(azimuthOfYaw(this.player.yaw)) : null;
+      this.map.devMarker = this.opts.dev && inField ? { x: this.player.x, z: this.player.z, az: azimuthOfYaw(this.player.yaw) } : null;
       // Readings that are ready to plot: paired with a symbol and with a back azimuth written down.
       const pad = (a: number) => `${String(Math.round(a)).padStart(3, '0')}°`;
       this.map.setNotes(inField ? this.notebook.readings
@@ -670,6 +686,78 @@ export class Game {
       this.openMap(false);
       this.notebook.open();
     });
+  }
+
+  // ================================================================== developer mode
+
+  private makeDevTools() {
+    const dev = new DevTools({
+      seed: this.opts.seed,
+      w: this.w,
+      sites: this.sites,
+      sight: this.sight,
+      player: this.player,
+      map: this.map,
+      notebook: this.notebook,
+      pace: this.pace,
+      team: this.team,
+      mission: () => this.mission,
+      inField: () => this.mode === 'field',
+      mapOpen: () => this.mapOpen,
+      eye: () => [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+      viewRange: () => (this.scene.fog as THREE.Fog).far,
+      tools: () => TOOLS.filter((t) => this.tools.has(t.id)).map((t) => t.name),
+      teleport: (x, z) => this.devTeleport(x, z),
+      teleportViaMap: () => {
+        if (this.mapOpen || this.pendingMark) return;
+        // A no-op resolver, so closing the map cancels the request like any other mark.
+        this.pendingMark = () => {};
+        this.openMap(true);
+        this.map.requestMark('DEV: ketuk titik tujuan teleport, lalu Kirim', (x, z) => {
+          this.pendingMark = null;
+          this.openMap(false);
+          this.devTeleport(x, z);
+        });
+      },
+      grantAllTools: () => {
+        this.tools = new Set(ALL_TOOLS);
+        this.map.setTools(this.tools);
+        this.notebook.canWrite = true;
+        $('btn-compass').classList.remove('disabled');
+        $('btn-map').classList.remove('disabled');
+      },
+      setFlying: (on) => { this.player.flying = on; },
+    });
+    dev.onUp = (v) => { this.input.touchUp = v; };
+    return dev;
+  }
+
+  private devTeleport(x: number, z: number) {
+    this.player.teleport(x, z, azimuthOfYaw(this.player.yaw));
+    // The jump is not walking: keep it out of the pace counter.
+    this.paceX = this.player.x;
+    this.paceZ = this.player.z;
+    this.chunks.update(x, z, LOAD_RADIUS, 24);
+  }
+
+  /** Developer mode options on the level select screen. */
+  private devLevelOptions() {
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = this.devQuick;
+    box.addEventListener('change', () => { this.devQuick = box.checked; });
+    const reset = el('button', 'btn ghost small', 'Hapus progres dev');
+    reset.addEventListener('click', () => {
+      this.progress = { unlocked: 1, best: {}, paceCount: null };
+      saveProgress(this.progress, DEV_KEY);
+      reset.textContent = 'Progres dev dihapus';
+    });
+    return el('div', 'dev-levels',
+      el('b', '', 'Mode developer'),
+      el('span', 'muted small', ' · semua level terbuka · progres disimpan terpisah dari siswa'),
+      el('label', 'dev-check', box, ' Alur cepat: semua alat dikemas, lewati kuis, briefing dan menandai tujuan'),
+      reset,
+    );
   }
 
   private toast(title: string, lines: string[]) {

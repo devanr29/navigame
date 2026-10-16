@@ -7,10 +7,13 @@ import { enterFullscreen, Game } from './game/game';
 const params = new URLSearchParams(location.search);
 const seed = params.get('seed') || 'jamadagni';
 const debug = params.has('debug');
+// Developer mode: open /developer (or ?developer on hosts without a /developer page).
+const dev = /\/developer\/?$/.test(location.pathname) || params.has('developer');
+if (dev) document.title = 'Navigasi Darat · Developer';
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 ($('logo') as HTMLImageElement).src = logoUrl;
-$('seed').textContent = `seed: ${seed}`;
+$('seed').textContent = `seed: ${seed}${dev ? ' · MODE DEVELOPER' : ''}`;
 
 function setProgress(stage: string, frac: number) {
   $('stage').textContent = stage;
@@ -41,6 +44,8 @@ async function boot() {
   const game = new Game(world, sites, {
     debug,
     debugLevel: Number.isInteger(lv) && lv >= 1 && lv <= 10 ? lv : null,
+    dev,
+    seed,
     logoUrl,
   });
   await game.preload(world.spawn[0], world.spawn[1], (f) => setProgress('Membangun dunia blok…', 0.8 + 0.2 * f));

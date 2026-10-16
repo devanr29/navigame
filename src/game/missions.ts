@@ -49,6 +49,8 @@ export interface Ctx {
 const M = (blocks: number) => Math.round(blocks * BLOCK_M);
 const dist = (a: P, b: P) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const deg = (a: number) => `${String(Math.round(a)).padStart(3, '0')}°`;
+const here = (c: Ctx): P => [c.player.x, c.player.z];
 
 /** Coordinates in the material's format: latitude first, then longitude (minutes′seconds″). */
 export function fmtCoord(p: P): string {
@@ -110,6 +112,14 @@ export abstract class Mission {
   onMapOpen() {}
   onMapClose() {}
   actions(): Action[] { return []; }
+
+  /**
+   * Developer mode only (/developer): the mission's internal state and the answers it checks against,
+   * so a tester can see why an objective did or did not tick and how the debrief will be scored.
+   */
+  devInfo(): [string, string][] { return []; }
+  /** Developer mode only: named points of this mission to teleport to. */
+  devPoints(): { label: string; p: P }[] { return []; }
 
   /** Removes the mission's objects from the world. */
   cleanup() {
@@ -258,6 +268,17 @@ class Orientation extends Mission {
       ]);
     }
   }
+
+  devInfo(): [string, string][] {
+    const p = this.pairs();
+    const f = this.c.map.orientFacing;
+    return [
+      ['Peta terutarakan sekarang', f === null ? 'peta tertutup' : `selisih ${this.c.map.orientationError(f).toFixed(1)}° (≤5° lulus)`],
+      ['Pasangan benar / semua / salah', `${p.correct} / ${p.any} / ${p.wrong}`],
+    ];
+  }
+
+  devPoints() { return [{ label: 'Titik awal', p: this.c.sites.orient }]; }
 }
 
 // ======================================================================= level 3: resection
@@ -302,7 +323,8 @@ class Resection extends Mission {
       const back = paired && rs.some((r) => r.pairedWith === id && r.backTyped !== null && Math.abs(r.backTyped - backAzimuth(r.azimuth)) < 0.5);
       const line = !!l && this.linesFrom([l.x, l.z]).length > 0;
       o[1 + k].text = `Titik ekstrem ${k + 1}${l ? ` (${l.name})` : ''}: bidik ${tick(aimed)} pasang ${tick(paired)} back az ${tick(back)} garis ${tick(line)}`;
-      o[1 + k].done = aimed && paired && back && line;
+      // Once a step is done it stays done: erasing a line to redraw it is normal map work.
+      o[1 + k].done ||= aimed && paired && back && line;
     }
   }
 
@@ -327,6 +349,20 @@ class Resection extends Mission {
       ['Batas lulus', '100 m'],
     ]);
   }
+
+  devInfo(): [string, string][] {
+    const out: [string, string][] = [];
+    this.c.notebook.readings.forEach((r, k) => {
+      if (r.pairedWith < 0) return;
+      const l = this.c.w.landmarks[r.pairedWith];
+      const ok = r.pairedWith === r.target ? 'pasangan benar' : `SALAH (terbidik: ${r.target < 0 ? 'tidak ada' : this.nameOf(r.target)})`;
+      out.push([`#${k + 1} → ${this.nameOf(r.pairedWith)}`,
+        `${ok} · back az ${deg(backAzimuth(r.azimuth))} · ditulis ${r.backTyped === null ? '—' : deg(r.backTyped)} · garis ${l ? this.linesFrom([l.x, l.z]).length : 0}`]);
+    });
+    return out;
+  }
+
+  devPoints() { return [{ label: 'Titik resection', p: this.c.sites.resection }]; }
 }
 
 // ======================================================================= level 4: intersection
@@ -379,8 +415,9 @@ class Intersection extends Mission {
     this.fx?.update(this.time);
     if (this.result) return;
     this.time += dt;
-    this.objectives[1].done = this.linesFrom(this.A).length > 0;
-    this.objectives[3].done = this.linesFrom(this.B).length > 0;
+    // Once drawn, the step stays done: erasing a line to redraw it is normal map work.
+    this.objectives[1].done ||= this.linesFrom(this.A).length > 0;
+    this.objectives[3].done ||= this.linesFrom(this.B).length > 0;
   }
 
   actions(): Action[] {
@@ -408,6 +445,21 @@ class Intersection extends Mission {
       ['Batas lulus', '150 m'],
     ]);
   }
+
+  devInfo(): [string, string][] {
+    const s = this.smoke;
+    const az = (p: P) => magneticOf(azimuthTo(p[0], p[1], s[0], s[1]));
+    const lines = (p: P) => this.linesFrom(p).map((l) => deg(l.az)).join(', ') || '—';
+    return [
+      ['Azimut benar A → asap', `${deg(az(this.A))} (bidikan ${this.readings.a === null ? '—' : deg(this.readings.a)})`],
+      ['Azimut benar B → asap', `${deg(az(this.B))} (bidikan ${this.readings.b === null ? '—' : deg(this.readings.b)})`],
+      ['Garis dari A / B', `${lines(this.A)} / ${lines(this.B)}`],
+      ['Jarak ke A / B', `${M(dist(here(this.c), this.A))} m / ${M(dist(here(this.c), this.B))} m (bidikan dihitung ≤20 m)`],
+      ['Jarak A–asap / B–asap', `${M(dist(this.A, s))} m / ${M(dist(this.B, s))} m`],
+    ];
+  }
+
+  devPoints() { return [{ label: 'Pos A', p: this.A }, { label: 'Pos B', p: this.B }, { label: 'Asap', p: this.smoke }]; }
 }
 
 // ======================================================================= level 5: navter route
@@ -428,8 +480,8 @@ class Route extends Mission {
     this.checked = r.crossroads.map(() => false);
     this.announced = r.crossroads.map(() => false);
     this.briefing = [
-      `Tujuanmu ada di ${fmtCoord(r.dest)}, di tepi jalan setapak. Tandai di peta sebelum berangkat.`,
-      'Mulailah dengan resection untuk memastikan posisi awal. Rencanakan jalur lewat jalan setapak dan catat persimpangan yang akan dilewati.',
+      `Tujuanmu ada di ${fmtCoord(r.dest)}, di tepi jalan. Tandai di peta sebelum berangkat.`,
+      'Mulailah dengan resection untuk memastikan posisi awal. Rencanakan jalur lewat jalan (garis ganda kuning di peta) dan jalan setapak, lalu catat persimpangan yang akan dilewati.',
       'Di setiap persimpangan, berhenti dan cek posisi (Tandai posisiku) sebelum memilih cabang. Salah cabang baru ketahuan di pengecekan berikutnya.',
     ];
     this.objectives = [
@@ -458,10 +510,12 @@ class Route extends Mission {
       o[o.length - 1].done = true;
       const n = this.checked.filter(Boolean).length;
       const all = n === this.checked.length;
+      const started = o[1].done;
       if (!all) this.lessons.push('Ada persimpangan yang dilewati tanpa cek posisi. Di lapangan, salah cabang paling mudah terjadi di persimpangan.');
+      if (!started) this.lessons.push('Resection di titik awal tidak dilakukan. Navigasi terbuka dimulai dengan memastikan posisi awal sebelum berangkat.');
       if (this.startErr !== null && this.startErr > 100) this.lessons.push(`Resection awal meleset ${this.startErr} m; perbaiki dengan memilih titik ekstrem yang berselisih arah mendekati 90°.`);
       this.lessons.push('Navigasi terbuka: posisi dipastikan dengan resection di titik awal dan di setiap persimpangan.');
-      this.finish(all, 40 + 35 * (n / this.checked.length) + this.timeScore(25), [
+      this.finish(all && started, 40 + 35 * (n / this.checked.length) + this.timeScore(25), [
         ['Persimpangan dicek', `${n} dari ${this.checked.length}`],
         ['Galat resection awal', this.startErr === null ? '—' : `${this.startErr} m`],
       ]);
@@ -490,6 +544,21 @@ class Route extends Mission {
         this.c.toast(`Persimpangan ${k + 1} dicek`, ['Bandingkan posisimu dengan rencana jalur, lalu pilih cabang.']);
       }
     });
+  }
+
+  devInfo(): [string, string][] {
+    const r = this.c.sites.route, h = here(this.c);
+    return [
+      ['Jarak ke titik awal', `${M(dist(h, r.start))} m (resection awal dihitung <63 m)`],
+      ...r.crossroads.map((j, k): [string, string] => [`Persimpangan ${k + 1}`, `${M(dist(h, j))} m · ${this.checked[k] ? 'dicek' : 'belum dicek'} (cek <38 m)`]),
+      ['Jarak ke tujuan', `${M(dist(h, r.dest))} m (selesai <38 m)`],
+      ['Galat resection awal', this.startErr === null ? '—' : `${this.startErr} m`],
+    ];
+  }
+
+  devPoints() {
+    const r = this.c.sites.route;
+    return [{ label: 'Titik awal', p: r.start }, ...r.crossroads.map((p, k) => ({ label: `Persimpangan ${k + 1}`, p })), { label: 'Tujuan', p: r.dest }];
   }
 }
 
@@ -530,7 +599,7 @@ class Declination extends Mission {
   update(dt: number) {
     if (this.result) return;
     this.time += dt;
-    this.objectives[0].done = this.linesFrom(this.startP).length > 0;
+    this.objectives[0].done ||= this.linesFrom(this.startP).length > 0;
   }
 
   actions(): Action[] {
@@ -574,6 +643,18 @@ class Declination extends Mission {
       ['Azimut kompas yang benar', `${Math.round(magAz)}°`],
     ]);
   }
+
+  devInfo(): [string, string][] {
+    const gridAz = azimuthTo(this.startP[0], this.startP[1], this.target[0], this.target[1]);
+    return [
+      ['Azimut peta / kompas benar', `${deg(gridAz)} / ${deg(magneticOf(gridAz))}`],
+      ['Kompas dikunci', this.locked === null ? '—' : deg(this.locked)],
+      ['Panjang leg', `${M(dist(this.startP, this.target))} m`],
+      ['Jarak ke patok sasaran', `${M(dist(here(this.c), this.target))} m (lulus ≤30 m)`],
+    ];
+  }
+
+  devPoints() { return [{ label: 'Patok awal', p: this.startP }, { label: 'Patok sasaran', p: this.target }]; }
 }
 
 // ======================================================================= level 7: pacing
@@ -647,6 +728,20 @@ class Pacing extends Mission {
       ['Galat', `${errPct.toFixed(1)}%`],
     ]);
   }
+
+  devInfo(): [string, string][] {
+    const h = here(this.c), pace = this.c.pace;
+    const m = (a: P, b: P) => `${(dist(a, b) * BLOCK_M).toFixed(1)} m`;
+    return [
+      ['Fase', this.phase],
+      ['Kalibrasi', this.calib === null ? '—' : `${this.calib} langkah / 100 m`],
+      ['Penghitung', `${Math.round(pace.steps)} langkah · ${Math.round(pace.metres)} m (lulus 270–330 m)`],
+      ['Jarak ke bendera hijau / merah', `${m(h, this.startP)} / ${m(h, this.endP)} (mulai >3,75 m, sampai <3,75 m)`],
+      ['Jarak hijau–merah', m(this.startP, this.endP)],
+    ];
+  }
+
+  devPoints() { return [{ label: 'Bendera hijau', p: this.startP }, { label: 'Bendera merah', p: this.endP }]; }
 }
 
 // ======================================================================= levels 8–10: navtup (and the final mission)
@@ -664,6 +759,7 @@ class Navtup extends Mission {
   protected obstacle: P | null = null;
   protected legStartSet = false;
   protected found = false;
+  protected teamPlaced = false;
 
   start() {
     const { sites } = this.c;
@@ -746,7 +842,7 @@ class Navtup extends Mission {
     this.time += dt;
     const { player, team } = this.c;
     const i0 = this.idx('Plot');
-    if (i0 >= 0) this.objectives[i0].done = this.linesFrom(this.startP).length > 0;
+    if (i0 >= 0) this.objectives[i0].done ||= this.linesFrom(this.startP).length > 0;
     // obstacle and detour
     if (this.withObstacle && this.obstacle) {
       if (team.blocked) this.obstacleHit = true;
@@ -809,6 +905,7 @@ class Navtup extends Mission {
     // Team faces the locked bearing (converted to grid for movement).
     const grid = (this.locked + this.declination + 360) % 360;
     team.place(player, grid);
+    this.teamPlaced = true;
     pace.reset();
     const k = this.idx('Atur');
     if (k >= 0) this.objectives[k].done = true;
@@ -859,13 +956,50 @@ class Navtup extends Mission {
     this.lessons.push('Navigasi tertutup: tanpa titik ekstrem, tim hanya mengandalkan azimut terkunci dan hitungan langkah.');
     const lockPts = this.locked === null ? 0 : 20 * clamp01(1 - (Math.abs(angleDiff(this.locked, magAz)) - 1) / 6);
     const pacePts = this.targetSteps ? 15 * clamp01(1 - Math.abs(this.stepsAtEnd - this.targetSteps) / (this.targetSteps * 0.3)) : 0;
-    const passed = !this.withObstacle || this.detourDone;
+    const missed: string[] = [];
+    if (this.locked === null) missed.push('kompas tidak dikunci');
+    if (!this.teamPlaced) missed.push('tim tidak diatur');
+    if (missed.length) this.lessons.unshift(`Pos sasaran ditemukan tanpa alur navigasi tertutup (${missed.join(', ')}). Di hutan lebat sasaran hanya bisa dicapai dengan azimut terkunci dan tim yang menerabas.`);
+    const passed = missed.length === 0 && (!this.withObstacle || this.detourDone);
     this.revealLeg();
     this.finish(passed, 50 * clamp01(1 - (e - 10) / 70) + lockPts + pacePts + this.timeScore(15), stats);
   }
 
   protected revealLeg() {
     this.c.map.reveals.push({ x: this.target[0], z: this.target[1], label: 'Pos sasaran', color: '#1d8a3a', from: this.startP });
+  }
+
+  devInfo(): [string, string][] {
+    const { team, pace } = this.c;
+    const gridAz = azimuthTo(this.startP[0], this.startP[1], this.target[0], this.target[1]);
+    const legM = M(dist(this.startP, this.target));
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    const dev = team.deviation();
+    const teamState = team.cutting
+      ? `menerabas · arah ${deg(magneticOf(team.heading))} · simpang ${dev === null ? '—' : `${dev.toFixed(1)}°`}${team.blocked ? ' · TERHALANG' : ''}`
+      : team.active ? 'mengikuti' : 'belum diatur';
+    const out: [string, string][] = [
+      ['Azimut peta / kompas benar', `${deg(gridAz)} / ${deg(magneticOf(gridAz))}`],
+      ['Kompas dikunci', this.locked === null ? '—' : deg(this.locked)],
+      ['Panjang leg', `${legM} m · langkah datar ${Math.round((legM * calib) / 100)} · target ${this.targetSteps ?? '—'}`],
+      ['Langkah sekarang', String(Math.round(pace.steps))],
+      ['Jarak ke sasaran', `${M(dist(here(this.c), this.target))} m (ditemukan <7,5 m)`],
+      ['Tim', teamState],
+      ['Galat akhir leg', this.legEndErr === null ? '—' : `${this.legEndErr} m (${this.stepsAtEnd} langkah)`],
+    ];
+    if (this.withObstacle && this.obstacle) {
+      const L = dist(this.startP, this.target);
+      const ux = (this.target[0] - this.startP[0]) / L, uz = (this.target[1] - this.startP[1]) / L;
+      const along = (this.c.player.x - this.startP[0]) * ux + (this.c.player.z - this.startP[1]) * uz;
+      out.push(['Rintangan', `tertabrak ${this.obstacleHit ? 'ya' : 'tidak'} · detour ${this.detourDone ? 'selesai' : 'belum'} · sepanjang garis ${M(along)} m / perlu >${M(L * 0.45 + 3)} m`]);
+    }
+    return out;
+  }
+
+  devPoints() {
+    const pts = [{ label: 'Titik awal leg', p: this.startP }, { label: 'Pos sasaran', p: this.target }];
+    if (this.obstacle) pts.splice(1, 0, { label: 'Rintangan', p: this.obstacle });
+    return pts;
   }
 }
 
@@ -956,12 +1090,34 @@ class FinalMission extends Navtup {
     const r = this.result!;
     const e1 = this.err1 ?? 999, e2 = this.err2 ?? 999;
     r.stats.unshift(['Galat resection awal', `${this.err1 ?? '—'} m`], ['Galat resection terakhir', `${this.err2 ?? '—'} m`]);
-    if (e2 > 80) r.lessons.splice(before, 0, 'Resection terakhir meleset jauh, sehingga garis navigasi tertutup berangkat dari titik yang salah. Hasil akhir sangat bergantung pada resection terakhir.');
+    if (this.err2 !== null && e2 > 80) r.lessons.splice(before, 0, 'Resection terakhir meleset jauh, sehingga garis navigasi tertutup berangkat dari titik yang salah. Hasil akhir sangat bergantung pada resection terakhir.');
+    const skipped = [
+      !this.objectives[0].done && 'peta tidak diutarakan',
+      this.err1 === null && 'resection awal tidak dilakukan',
+      this.err2 === null && 'resection terakhir di tepi hutan tidak dilakukan',
+    ].filter((s): s is string => !!s);
+    if (skipped.length) r.lessons.splice(before, 0, `Alur misi akhir belum lengkap: ${skipped.join(', ')}.`);
     // Final score: blend navtup score with both resections.
     r.score = Math.round(0.6 * r.score + 20 * clamp01(1 - e1 / 150) + 20 * clamp01(1 - e2 / 150));
-    r.passed = true;
+    // Pass rule: the whole flow is done (navtup part checked by super.complete()).
+    r.passed &&= skipped.length === 0;
     if (this.edgeP) this.c.map.reveals.push({ x: this.edgeP[0], z: this.edgeP[1], label: 'Titik resection terakhir', color: '#1d6ad8' });
     this.c.map.redraw();
+  }
+
+  devInfo(): [string, string][] {
+    const fd = this.forestNear(this.c.player.x, this.c.player.z);
+    return [
+      ['Galat resection awal / terakhir', `${this.err1 ?? '—'} m / ${this.err2 ?? '—'} m`],
+      ['Jarak ke hutan', fd === Infinity ? '>50 m' : `${M(fd)} m (resection terakhir ≤38 m)`],
+      ...super.devInfo(),
+    ];
+  }
+
+  devPoints() {
+    const pts = [{ label: 'Titik awal', p: this.c.sites.final.start }, { label: 'Pos sasaran', p: this.target }];
+    if (this.edgeP) pts.splice(1, 0, { label: 'Titik resection terakhir', p: this.edgeP });
+    return pts;
   }
 }
 

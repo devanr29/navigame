@@ -79,17 +79,6 @@ export function buildLandmarks(list: Landmark[]): LandmarkObjects {
         g.box(-len, -0.6, 0.7, len, -0.25, 1.0, rgb(0x5a3a1e));
         break;
       }
-      case 'lonetree': {
-        // A large beringin, wider and darker than any other tree, easy to recognise from afar.
-        g.box(-0.45, 0, -0.45, 0.45, 4.5, 0.45, rgb(0x5b3b22));
-        g.box(-3.5, 3.5, -3.5, 3.5, 5.5, 3.5, rgb(0x2e5e2a));
-        g.box(-2.5, 5.5, -2.5, 2.5, 7.0, 2.5, rgb(0x356b30));
-        g.box(-1.5, 7.0, -1.5, 1.5, 8.0, 1.5, rgb(0x3d7836));
-        for (const [dx, dz] of [[-2.4, -2.4], [2.4, -2.4], [-2.4, 2.4], [2.4, 2.4]]) {
-          g.box(dx - 0.12, 0, dz - 0.12, dx + 0.12, 3.5, dz + 0.12, rgb(0x6a4a30)); // aerial roots
-        }
-        break;
-      }
       case 'monument': {
         // 11 m white obelisk on a stepped base with a red cap, standing alone on a bare hilltop.
         g.box(-1.1, 0, -1.1, 1.1, 0.4, 1.1, rgb(0x9a9a92));

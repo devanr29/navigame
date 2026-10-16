@@ -32,6 +32,8 @@ const RANGE = 420;
 
 export function findSites(w: WorldData): Sites {
   const N = w.size;
+  // Roads and footpaths alike: everything a mission can follow on foot.
+  const ways = [...w.roads, ...w.trails];
   const sight = new Sight(w);
   const rng = makeRng(hashString(w.seed + ':sites'));
   const idx = (x: number, z: number) => Math.floor(z) * N + Math.floor(x);
@@ -58,7 +60,10 @@ export function findSites(w: WorldData): Sites {
   };
   const nearSurface = (x: number, z: number, r: number, s: number) => {
     for (let dz = -r; dz <= r; dz += 2) for (let dx = -r; dx <= r; dx += 2) {
-      if (inside(x + dx, z + dz, 0) && w.surface[idx(x + dx, z + dz)] === s) return true;
+      if (!inside(x + dx, z + dz, 0)) continue;
+      const v = w.surface[idx(x + dx, z + dz)];
+      // a road counts as a way too
+      if (v === s || (s === Surface.Path && v === Surface.Road)) return true;
     }
     return false;
   };
@@ -198,7 +203,7 @@ export function findSites(w: WorldData): Sites {
 
   // ---- intersection: smoke in the open, seen from two trail posts at a good crossing angle
   const posts: P[] = [];
-  for (const t of w.trails) {
+  for (const t of ways) {
     for (let k = 0; k < t.length / 2; k += 30) {
       const x = t[k * 2], z = t[k * 2 + 1];
       if (isOpen(x, z) && inside(x, z, 20)) posts.push([x, z]);
@@ -256,7 +261,7 @@ export function findSites(w: WorldData): Sites {
 
   // ---- pace course: 40 blocks (100 m) of trail with little climb
   let pace: Sites['pace'] | null = null;
-  for (const t of w.trails) {
+  for (const t of ways) {
     const n = t.length / 2;
     for (let k = 0; k < n && !pace; k += 4) {
       let len = 0, j = k, lo = Infinity, hi = -Infinity, dry = true;
@@ -293,13 +298,14 @@ export function findSites(w: WorldData): Sites {
     for (let k = 2; k < poly.length; k += 2) L += Math.hypot(poly[k] - poly[k - 2], poly[k + 1] - poly[k - 1]);
     return L;
   };
-  const far = w.trails[w.trails.length - 1];
+  // The far side of the route: the road leaving the second crossroad (J2 → E3).
+  const far = w.roads[w.roads.length - 1];
   const J1 = w.junctions[0];
   // The start needs two visible titik ekstrem for the opening resection. Candidates: points on any
   // trail that ends at the first crossroad, preferring 50–110 blocks before it (a small penalty per
   // extra block); failing that, an open spot near a trail 40–160 blocks from the crossroad.
   let routeStart: P = w.spawn, bestScore = -Infinity;
-  for (const t of w.trails) {
+  for (const t of ways) {
     const L = polyLen(t);
     if (dist([t[t.length - 2], t[t.length - 1]], J1) > 3) continue;
     for (let back = 50; back <= L; back += 6) {

@@ -47,6 +47,8 @@ export const Surface = {
   Sand: 3,
   Path: 4,
   RiverBed: 5,
+  /** Road (jalan): wider than a footpath, gravel. */
+  Road: 6,
 } as const;
 
 export const Zone = {
@@ -54,7 +56,7 @@ export const Zone = {
   Forest: 1,
 } as const;
 
-export type LandmarkKind = 'peak' | 'tower' | 'hut' | 'bridge' | 'lonetree' | 'monument';
+export type LandmarkKind = 'peak' | 'tower' | 'hut' | 'bridge' | 'monument';
 
 export interface Landmark {
   kind: LandmarkKind;
@@ -90,6 +92,12 @@ export interface WorldData {
   /** Trees: [x, z, groundY, trunkH, canopy, kind] per tree. kind 0 = open, 1 = forest, 2 = bush. */
   trees: Float32Array;
   rivers: Polyline[];
+  /**
+   * Roads (jalan): the through-route from the west edge over both crossroads and the bridge to the
+   * south edge. Wider than a footpath and drawn as a double line, a clear line to plan a route along.
+   */
+  roads: Polyline[];
+  /** Footpaths (jalan setapak): the branches off the road. */
   trails: Polyline[];
   junctions: [number, number][];
   landmarks: Landmark[];

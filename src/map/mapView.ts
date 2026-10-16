@@ -21,6 +21,7 @@ const C = {
   index: '#9a5f2c',
   river: '#2f7fd1',
   trail: '#3a2a1a',
+  road: '#f2b84b',
   grid: 'rgba(20, 40, 90, 0.55)',
   ink: '#1d1d1b',
   pencil: '#3d3d46',
@@ -54,6 +55,7 @@ export class MapView {
   private indexPath = new Path2D();
   private riverPaths: Path2D[] = [];
   private trailPath = new Path2D();
+  private roadPath = new Path2D();
   private labels: Label[] = [];
   private latLines: number[] = [];
   private lonLines: number[] = [];
@@ -95,6 +97,8 @@ export class MapView {
   private request: Request | null = null;
   symbols: MapSymbol[] = [];
   reveals: Reveal[] = [];
+  /** Developer mode only: the player's exact position and grid heading, drawn on the sheet. */
+  devMarker: { x: number; z: number; az: number } | null = null;
   /** Grid azimuth the player faces while the map is open, when the mission asks to show orientation. */
   orientFacing: number | null = null;
   declinationLabel = 'Deklinasi magnetis: 0°';
@@ -545,6 +549,7 @@ export class MapView {
       this.riverPaths.push(p);
     }
     for (const t of this.w.trails) addPoly(this.trailPath, t);
+    for (const r of this.w.roads) addPoly(this.roadPath, r);
   }
 
   private buildGrid() {
@@ -643,6 +648,14 @@ export class MapView {
     ctx.stroke(this.trailPath);
     ctx.setLineDash([]);
 
+    // Road: a double line (dark casing, coloured fill).
+    ctx.strokeStyle = C.ink;
+    ctx.lineWidth = 4.2 * m;
+    ctx.stroke(this.roadPath);
+    ctx.strokeStyle = C.road;
+    ctx.lineWidth = 2.4 * m;
+    ctx.stroke(this.roadPath);
+
     ctx.strokeStyle = C.grid;
     ctx.lineWidth = 0.8 * m;
     ctx.beginPath();
@@ -672,6 +685,7 @@ export class MapView {
     this.drawMargins(m);
     this.drawToolOverlays(m);
     this.drawReveals(m);
+    if (this.devMarker) this.drawDevMarker(this.devMarker, m);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.tool === 'penggaris' && this.request?.kind !== 'symbol') this.drawCrosshair(W / 2, H / 2);
@@ -848,6 +862,28 @@ export class MapView {
     }
   }
 
+  private drawDevMarker(d: { x: number; z: number; az: number }, m: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(d.x, d.z);
+    ctx.scale(m, m);
+    ctx.rotate((d.az * Math.PI) / 180);
+    ctx.fillStyle = '#e0218a';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -11);
+    ctx.lineTo(6, 7);
+    ctx.lineTo(0, 3);
+    ctx.lineTo(-6, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    ctx.font = '700 10px system-ui, sans-serif';
+    this.text(d.x + 10 * m, d.z - 10 * m, 'DEV: posisi', '#e0218a', 0, m, true, 'left');
+  }
+
   private drawPost(s: MapSymbol, m: number) {
     const ctx = this.ctx;
     ctx.save();
@@ -1017,9 +1053,9 @@ export class MapView {
       ['Menara radio', (c) => drawSymbol(c, 'tower')],
       ['Pondok', (c) => drawSymbol(c, 'hut')],
       ['Jembatan', (c) => { c.beginPath(); c.moveTo(-9, -6); c.lineTo(-6, -3); c.lineTo(6, -3); c.lineTo(9, -6); c.moveTo(-9, 6); c.lineTo(-6, 3); c.lineTo(6, 3); c.lineTo(9, 6); c.stroke(); }],
-      ['Pohon tunggal', (c) => drawSymbol(c, 'lonetree')],
       ['Tugu', (c) => drawSymbol(c, 'monument')],
       ['Pos / patok (koordinat diketahui)', (c) => { c.fillStyle = '#fff'; c.beginPath(); c.arc(0, 0, 4.5, 0, Math.PI * 2); c.fill(); c.stroke(); }],
+      ['Jalan', (c) => { c.lineWidth = 4.2; c.beginPath(); c.moveTo(-10, 0); c.lineTo(10, 0); c.stroke(); c.strokeStyle = C.road; c.lineWidth = 2.4; c.stroke(); }],
       ['Jalan setapak', (c) => { c.setLineDash([5, 3]); c.strokeStyle = C.trail; c.beginPath(); c.moveTo(-10, 0); c.lineTo(10, 0); c.stroke(); c.setLineDash([]); }],
       ['Sungai', (c) => { c.strokeStyle = C.river; c.lineWidth = 3; c.beginPath(); c.moveTo(-10, 2); c.quadraticCurveTo(0, -4, 10, 2); c.stroke(); }],
       ['Hutan lebat', (c) => { c.fillStyle = `rgb(${C.forest.join(',')})`; c.fillRect(-10, -6, 20, 12); c.strokeRect(-10, -6, 20, 12); }],
@@ -1397,16 +1433,6 @@ export function drawSymbol(ctx: CanvasRenderingContext2D, kind: Landmark['kind']
       break;
     case 'hut':
       ctx.fillRect(-4, -4, 8, 8);
-      break;
-    case 'lonetree':
-      ctx.beginPath();
-      ctx.moveTo(0, 6); ctx.lineTo(0, 1);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(0, -2, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#4c8a3e';
-      ctx.fill();
-      ctx.stroke();
       break;
     case 'monument':
       ctx.beginPath();

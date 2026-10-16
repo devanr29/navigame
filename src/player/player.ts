@@ -13,6 +13,11 @@ const GRAVITY = 22;
 const JUMP_V = 7;
 const RADIUS = 0.2;
 const SWIM_DEPTH = 0.55; // how far the feet sit below the water surface when swimming
+// Developer mode flight (/developer): free movement, no collision or gravity.
+const FLY = 30 / BLOCK_M; // 30 m/s
+const FLY_FAST = 90 / BLOCK_M;
+const FLY_CLIMB = 20 / BLOCK_M;
+const FLY_CEILING = 400; // blocks (1 km above the base elevation)
 
 export class Player {
   x: number;
@@ -32,6 +37,8 @@ export class Player {
   sprinting = false;
   /** When true, the team (navtup) moves the player along the cut path; walking input is ignored. */
   carried = false;
+  /** Developer mode only: fly freely through the world. */
+  flying = false;
   private vy = 0;
   private onGround = true;
   private camY: number;
@@ -111,6 +118,7 @@ export class Player {
     this.yaw -= lx * this.lookScale;
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - ly * this.lookScale));
 
+    if (this.flying && !this.carried) { this.fly(dt, input, x0, z0, y0); return; }
     const still = this.frozen || this.carried;
     let mx = still ? 0 : input.moveX, my = still ? 0 : input.moveY;
     const len = Math.hypot(mx, my);
@@ -168,6 +176,28 @@ export class Player {
   applyCamera(cam: THREE.PerspectiveCamera) {
     cam.position.set(this.x, this.camY + EYE, this.z);
     cam.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+  }
+
+  private fly(dt: number, input: Input, x0: number, z0: number, y0: number) {
+    input.takeJump();
+    const still = this.frozen;
+    let mx = still ? 0 : input.moveX, my = still ? 0 : input.moveY;
+    const len = Math.hypot(mx, my);
+    if (len > 1) { mx /= len; my /= len; }
+    const speed = input.sprint ? FLY_FAST : FLY;
+    const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+    const N = this.w.size;
+    this.x = Math.max(1, Math.min(N - 1, this.x + (-sin * my + cos * mx) * speed * dt));
+    this.z = Math.max(1, Math.min(N - 1, this.z + (-cos * my - sin * mx) * speed * dt));
+    const floor = this.standHeight(this.x, this.z);
+    const g = Number.isFinite(floor) ? floor : this.w.height[Math.floor(this.z) * N + Math.floor(this.x)];
+    this.footY = Math.max(g, Math.min(FLY_CEILING, this.footY + (still ? 0 : input.moveUp) * FLY_CLIMB * (input.sprint ? 2 : 1) * dt));
+    this.camY = this.footY;
+    this.vy = 0;
+    this.onGround = this.footY <= g + 0.001;
+    this.sprinting = false;
+    this.moved = Math.hypot(this.x - x0, this.z - z0);
+    this.rose = this.footY - y0;
   }
 
   private tryMove(nx: number, nz: number) {

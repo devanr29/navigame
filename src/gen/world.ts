@@ -165,7 +165,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) markSolid(tower[0] + dx, tower[1] + dz);
   markSolid(peak[0], peak[1]);
 
-  // Lone tree on an open hilltop in the far corner from the forest.
+  // A named summit (puncak) on the open hilltop in the far corner from the forest.
   let lone: P = T(0.12, 0.25);
   {
     let best = -Infinity;
@@ -181,6 +181,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
       }
     }
   }
+  flatten(lone, 1);
   markSolid(lone[0], lone[1]);
 
   // Stone monument (tugu) on top of the hill between the river and the main peak.
@@ -224,31 +225,34 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
   syncHeight();
   onProgress('Menempatkan titik ekstrem', 1);
 
-  // ---------------------------------------------------------------- 5. Trails (A* over terrain)
+  // ---------------------------------------------------------------- 5. Roads and trails (A* over terrain)
   onProgress('Membuka jalan setapak', 0);
+  // 1 = footpath, 2 = verge (no trees), 3 = road
   const trailMask = new Uint8Array(NN);
+  const roads: Polyline[] = [];
   const trails: Polyline[] = [];
   const E1 = clampIn(T(0.0, 0.43 + J(0.04)), 3);
   const E2 = clampIn(T(0.2 + J(0.03), 0.0), 3);
   const E3 = clampIn(T(0.56 + J(0.04), 1.0), 3);
-  const routes: [P, P][] = [
-    [E1, J1],
-    [J1, bEndA],
-    [bEndB, J2],
-    [E2, J1],
-    [J1, hutDoor],
-    [J2, [peak[0] + 0.5, peak[1] + 2.5]],
-    [J2, [tower[0] + 0.5, tower[1] + 3.5]],
-    [J2, E3],
+  // [from, to, road]: the through-route E1 → J1 → bridge → J2 → E3 is a road, the branches footpaths.
+  const routes: [P, P, boolean][] = [
+    [E1, J1, true],
+    [J1, bEndA, true],
+    [bEndB, J2, true],
+    [E2, J1, false],
+    [J1, hutDoor, false],
+    [J2, [peak[0] + 0.5, peak[1] + 2.5], false],
+    [J2, [tower[0] + 0.5, tower[1] + 3.5], false],
+    [J2, E3, true],
   ];
-  routes.forEach(([a, b], k) => {
+  routes.forEach(([a, b, road], k) => {
     const cells = astar(a, b);
     if (cells.length < 2) return;
     const poly = smoothCells(cells);
     if (k === 1) poly.push(bc[0], bc[1]); // continue onto the bridge
     if (k === 2) poly.unshift(bc[0], bc[1]);
-    trails.push(poly);
-    rasterTrail(poly);
+    (road ? roads : trails).push(poly);
+    rasterTrail(poly, road);
     onProgress('Membuka jalan setapak', (k + 1) / routes.length);
   });
 
@@ -267,6 +271,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
       if (sandMask[i]) s = Surface.Sand;
       if (water[i] >= 0) s = Surface.RiverBed;
       if (trailMask[i] === 1) s = Surface.Path;
+      if (trailMask[i] === 3) s = Surface.Road;
       surface[i] = s;
     }
   }
@@ -303,12 +308,12 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     { kind: 'tower', name: 'Menara Radio', x: tower[0] + 0.5, z: tower[1] + 0.5, y: height[tower[1] * N + tower[0]] },
     { kind: 'hut', name: 'Pondok', x: hutC[0], z: hutC[1], y: height[hutC[1] * N + hutC[0]] },
     { kind: 'bridge', name: 'Jembatan', x: bc[0], z: bc[1], y: bLevel + 1, dir, halfLen },
-    { kind: 'lonetree', name: 'Pohon Beringin', x: lone[0] + 0.5, z: lone[1] + 0.5, y: height[lone[1] * N + lone[0]] },
+    { kind: 'peak', name: 'Puncak Pasir Malang', x: lone[0] + 0.5, z: lone[1] + 0.5, y: height[lone[1] * N + lone[0]] },
     { kind: 'monument', name: 'Tugu Batas', x: tugu[0] + 0.5, z: tugu[1] + 0.5, y: height[tugu[1] * N + tugu[0]] },
     ...hilltops.map((h, k): Landmark => ({ kind: 'peak', name: HILL_NAMES[k], x: h[0] + 0.5, z: h[1] + 0.5, y: height[h[1] * N + h[0]] })),
   ];
 
-  const spawnPoly = trails[0];
+  const spawnPoly = roads[0];
   const si = Math.min(12, spawnPoly.length / 2 - 1);
   const spawn: P = [spawnPoly[si * 2], spawnPoly[si * 2 + 1]];
 
@@ -316,6 +321,7 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     seed, size: N, heightF, height, water, deck, solid, surface, zone,
     trees: new Float32Array(treeList),
     rivers: [mainPath, tribPath],
+    roads,
     trails,
     junctions: [J1, J2],
     landmarks,
@@ -496,14 +502,18 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     return pts;
   }
 
-  /** Marks trail cells (about 2 blocks wide); where the trail fords water it gets a plank crossing. */
-  function rasterTrail(poly: Polyline) {
+  /**
+   * Marks trail cells (about 2 blocks wide, a road about 3.5); where the way fords water it gets a
+   * plank crossing.
+   */
+  function rasterTrail(poly: Polyline, road: boolean) {
+    const core = road ? 2.6 : 0.85, verge = road ? 5 : 2.6, R = road ? 2 : 1;
     const dense = resample(poly, 0.4);
     for (let k = 0; k < dense.length / 2; k++) {
       const px = dense[k * 2];
       const pz = dense[k * 2 + 1];
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -R; dz <= R; dz++) {
+        for (let dx = -R; dx <= R; dx++) {
           const x = Math.floor(px + dx);
           const z = Math.floor(pz + dz);
           if (!inside(x, z)) continue;
@@ -511,10 +521,10 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
           const ddz = z + 0.5 - pz;
           const i = z * N + x;
           const dd = ddx * ddx + ddz * ddz;
-          if (dd <= 0.85) {
+          if (dd <= core) {
             if (water[i] >= 0 && deck[i] < 0 && riverId[i] === 2) deck[i] = water[i];
-            if (water[i] < 0) trailMask[i] = 1;
-          } else if (dd <= 2.6 && !trailMask[i]) {
+            if (water[i] < 0 && trailMask[i] !== 3) trailMask[i] = road ? 3 : 1;
+          } else if (dd <= verge && !trailMask[i]) {
             trailMask[i] = 2; // verge: keeps trees off the trail edge
           }
         }

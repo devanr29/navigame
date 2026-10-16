@@ -12,6 +12,10 @@ export class Input {
   enabled = true;
   /** Developer testing only (?debug&autowalk): hold "forward". */
   forceForward = false;
+  /** Developer mode flight: +1 up (Space/E or the on-screen button), −1 down (Q/Ctrl). */
+  moveUp = 0;
+  /** On-screen up/down buttons while flying (developer mode). */
+  touchUp = 0;
   private lookX = 0;
   private lookY = 0;
   private jumpQueued = false;
@@ -75,6 +79,8 @@ export class Input {
     if (kl > 0) { kx /= kl; ky /= kl; }
     this.moveX = this.enabled ? kx + this.joyVec[0] : 0;
     this.moveY = this.enabled ? ky + this.joyVec[1] + (this.forceForward ? 1 : 0) : 0;
+    const up = (k.has('Space') || k.has('KeyE') ? 1 : 0) - (k.has('KeyQ') || k.has('ControlLeft') ? 1 : 0);
+    this.moveUp = this.enabled ? Math.max(-1, Math.min(1, up + this.touchUp)) : 0;
     const joyMag = Math.hypot(this.joyVec[0], this.joyVec[1]);
     this.sprint = k.has('ShiftLeft') || k.has('ShiftRight') || joyMag > 0.95;
   }
@@ -83,6 +89,7 @@ export class Input {
     this.joyId = -1;
     this.lookId = -1;
     this.joyVec = [0, 0];
+    this.touchUp = 0;
     this.keys.clear();
     this.joyBase.style.display = 'none';
   }

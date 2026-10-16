@@ -324,3 +324,41 @@ html, body {
 }
 #loading-mini[hidden] { display: none; }
 input { user-select: text; -webkit-user-select: text; touch-action: manipulation; }
+
+/* ---- developer mode (/developer) ---- */
+#dev { position: fixed; z-index: 20; pointer-events: none; }
+#dev .btn { pointer-events: auto; }
+.dev-toggle {
+  position: fixed; left: calc(8px + var(--safe-l)); bottom: 8px; z-index: 21;
+  background: #e0218a; border-color: #ff7cc4; font-weight: 800; letter-spacing: 0.05em;
+}
+.dev-panel {
+  position: fixed; left: calc(8px + var(--safe-l)); top: 8px; bottom: 56px;
+  width: min(420px, calc(100vw - 16px)); overflow-y: auto; pointer-events: auto;
+  background: rgba(14, 10, 18, 0.9); border: 1px solid #e0218a; border-radius: 10px;
+  padding: 8px 10px; font: 12px/1.35 system-ui, sans-serif;
+  user-select: text; -webkit-user-select: text; touch-action: pan-y;
+}
+.dev-panel h4 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #ff7cc4; }
+.dev-bar, .dev-points { display: flex; flex-wrap: wrap; gap: 6px; }
+.dev-points { margin-top: 6px; }
+.dev-rows { width: 100%; border-collapse: collapse; }
+.dev-rows td { padding: 2px 4px; vertical-align: top; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.dev-rows td:first-child { opacity: 0.7; white-space: nowrap; padding-right: 8px; }
+.dev-rows td:last-child { font-family: ui-monospace, monospace; font-size: 11px; word-break: break-word; }
+.dev-objs { margin: 6px 0; }
+.dev-objs .ok { color: #7fe39a; }
+.dev-log { font: 11px/1.35 ui-monospace, monospace; }
+.dev-log > div { padding: 2px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.dev-log-warn { color: #ffcf6a; }
+.dev-log-error { color: #ff7a7a; font-weight: 700; }
+.dev-updown {
+  position: fixed; right: calc(110px + var(--safe-r)); bottom: 28px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.dev-updown .btn { width: 56px; height: 56px; background: rgba(224, 33, 138, 0.55); border-color: #ff7cc4; }
+.dev-levels {
+  margin: 6px 0 12px; padding: 8px 10px; border: 1px solid #e0218a; border-radius: 8px;
+  background: rgba(224, 33, 138, 0.12); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+}
+.dev-check { flex-basis: 100%; display: flex; align-items: center; gap: 6px; font-size: 13px; }
