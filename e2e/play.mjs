@@ -327,8 +327,8 @@ async function cutTo(page, az, steps) {
     });
     if (st.result) break;
     if (st.blocked) blockedSeen = true;
-    // compasman: steer back toward the bearing
-    await page.evaluate((dev) => { T.g.team.steer = dev === null || Math.abs(dev) < 0.5 ? 0 : dev > 0 ? -1 : 1; }, st.dev);
+    // compasman: call the penerabas back onto the bearing, one step at a time
+    await page.evaluate(() => { const tm = T.g.team, c = tm.correction(); if (c) tm.command(c.dir, 1); });
     // End the leg at the post, or once it is clearly past it (the distance grows again near the
     // post): then search around the end point, as the GDD's end-of-leg search.
     minD = Math.min(minD, st.d);

@@ -750,7 +750,7 @@ class SummitClimb extends Mission {
       'Di antara ujung jalan dan puncak ada hutan muda yang rapat: puncak tidak terlihat dan tidak ada jalan. Ini navigasi tertutup.',
       '1. Resection: di ujung jalan masih terlihat beberapa titik ekstrem. Bidik dua (atau tiga), pasangkan di Catatan, gariskan back azimuth-nya, lalu tandai posisimu.',
       '2. Kunci kompas: di peta plot garis dari posisimu ke puncak, ukur azimutnya dengan busur dan jaraknya dengan penggaris, lalu kunci kompas pada azimut itu.',
-      `3. Bergerak: sebagai compasman kamu tidak berjalan sendiri. Isi jumlah langkah, lalu tim maju di azimut terkunci. Penerabas menebas pohon di depan dengan golok, sweeper di belakangnya menyapu tebangan dari jalur. Langkahmu ${calib} per 100 m di medan datar; di hutan dan tanjakan tambahkan sekitar 20–30%.`,
+      `3. Bergerak: sebagai compasman kamu tidak berjalan sendiri. Isi jumlah langkah, lalu tim maju di azimut terkunci. Urutan tim: penerabas, sweeper, compasman, stringlineman. Penerabas menebas pohon di depan dengan golok dan sweeper di belakangnya menyapu tebangan dari jalur; kamu dan stringlineman baru berjalan setelah jalur di depan bersih. Bila penerabas keluar dari azimut, kamu memberi aba-aba "jalan ke kiri/kanan … langkah". Langkahmu ${calib} per 100 m di medan datar; di hutan dan tanjakan tambahkan sekitar 20–30%.`,
       'Ulangi Maju sampai tim keluar dari hutan di puncak.',
     ];
     this.objectives = [
@@ -823,7 +823,8 @@ class SummitClimb extends Mission {
     const n = Math.min(2000, Math.round(v.steps));
     const { team, player, pace } = this.c;
     if (!team.cutting) {
-      // first move: penerabas in front on the bearing, sweeper and stringlineman behind the compasman
+      // first move: penerabas and sweeper set off on the bearing, compasman and stringlineman follow
+      team.stride = 100 / calib;
       team.place(player, gridOf(this.locked));
       pace.reset();
     }
@@ -901,7 +902,7 @@ class SummitClimb extends Mission {
       ['Jarak', `${legM} m · langkah datar ${Math.round((legM * calib) / 100)}`],
       ['Langkah', `${Math.round(pace.steps)}${this.moveEnd === null ? '' : ` → ${Math.round(this.moveEnd)}`} · gerakan ${this.moves.join(' + ') || '—'}`],
       ['Jarak ke puncak', `${M(dist(here(this.c), t))} m (sampai <${M(SUMMIT_REACH)} m)`],
-      ['Tim', team.cutting ? `${team.auto ? (team.chopping ? 'menebas' : 'maju') : 'berhenti'}${team.blocked ? ' · TERHALANG' : ''} · ${team.felledCount} pohon` : 'belum diatur'],
+      ['Tim', team.cutting ? `${team.auto ? (team.chopping ? 'menebas' : team.waiting ? 'compasman menunggu' : 'maju') : 'berhenti'}${team.blocked ? ' · TERHALANG' : ''} · ${team.felledCount} pohon` : 'belum diatur'],
     ];
   }
 
@@ -968,8 +969,8 @@ abstract class Navtup extends Mission {
       if (this.locked !== null && this.legEndErr === null) acts.push({ id: 'team', label: 'Atur posisi tim', primary: true, run: () => this.placeTeam() });
     } else {
       acts.push(
-        { id: 'left', label: '◀ Kiri', run: () => {}, hold: (d) => { team.steer = d ? -1 : 0; } },
-        { id: 'right', label: 'Kanan ▶', run: () => {}, hold: (d) => { team.steer = d ? 1 : 0; } },
+        { id: 'left', label: '◀ Kiri 1 langkah', run: () => team.command(-1) },
+        { id: 'right', label: 'Kanan 1 langkah ▶', run: () => team.command(1) },
         { id: 't90l', label: '↶ 90°', run: () => team.turn90(-1) },
         { id: 't90r', label: '90° ↷', run: () => team.turn90(1) },
         { id: 'tally', label: 'Hitung ulang', run: () => { this.c.pace.tally = 0; } },
@@ -998,12 +999,13 @@ abstract class Navtup extends Mission {
     const { team, player, pace } = this.c;
     if (this.locked === null) return;
     // Team faces the locked bearing (converted to grid for movement).
+    team.stride = 100 / (this.c.progress.paceCount ?? DEFAULT_PACE);
     team.place(player, gridOf(this.locked));
     this.teamPlaced = true;
     pace.reset();
     const k = this.idx('Atur');
     if (k >= 0) this.objectives[k].done = true;
-    this.c.toast('Tim siap menerabas', ['Dorong joystick ke depan (atau W) untuk maju. Pantau penunjuk arah dan beri aba-aba Kiri/Kanan.']);
+    this.c.toast('Tim siap menerabas', ['Dorong joystick ke depan (atau W) untuk maju. Penerabas dan sweeper berangkat dulu membuka jalur; kamu dan stringlineman menyusul. Bidik penerabas lewat kompas: bila ia keluar dari azimut, beri aba-aba "jalan ke kiri/kanan 1 langkah".']);
   }
 
   protected recordLegEnd() {
@@ -1064,7 +1066,7 @@ abstract class Navtup extends Mission {
     const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
     const dev = team.deviation();
     const teamState = team.cutting
-      ? `menerabas · arah ${deg(magneticOf(team.heading))} · simpang ${dev === null ? '—' : `${dev.toFixed(1)}°`}${team.blocked ? ' · TERHALANG' : ''}`
+      ? `menerabas · arah ${deg(magneticOf(team.heading))} · simpang ${dev === null ? '—' : `${dev.toFixed(1)}° (${team.offsetSteps()!.toFixed(1)} langkah)`}${team.blocked ? ' · TERHALANG' : ''}`
       : team.active ? 'mengikuti' : 'belum diatur';
     return [
       ['Azimut kompas benar', deg(magneticOf(gridAz))],

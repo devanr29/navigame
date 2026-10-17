@@ -199,12 +199,14 @@ In navtup, no landmark is visible, so resection is impossible. The team plots on
 
 | Role | Job (from material) | In the game |
 |---|---|---|
-| Compasman | Locks the compass and keeps the penerabas moving straight on the bearing | Default player role. Watches the bearing gauge and directs the penerabas: "left", "right", "straight". |
-| Penerabas | Cuts through trees and obstacles toward the target | NPC that clears vegetation blocks wherever the compasman points. A bad direction means a crooked path. |
-| Sweeper | Clears leftover vegetation still blocking the path | NPC that widens the cut; a skipped sweep slows the team. |
-| Stringlineman | Places stringline markers along the path | NPC that leaves a visible line. The player can follow it back if they need to retreat. |
+| Penerabas | Cuts through trees and obstacles toward the target | First in line. NPC that clears vegetation blocks ahead; he drifts off the bearing on his own. |
+| Sweeper | Clears leftover vegetation still blocking the path | Second, right behind the penerabas. NPC that widens the cut and clears felled trees off the lane. |
+| Compasman | Locks the compass and keeps the penerabas moving straight on the bearing | Third; default player role. Sights the penerabas through the locked compass and calls a sidestep when he is off the line: "jalan ke kiri 1 langkah". A missed correction means a crooked path. |
+| Stringlineman | Places stringline markers along the path | Last. NPC that leaves a visible line. The player can follow it back if they need to retreat. |
 
-**Level 5, the summit climb.** The team starts at the end of the footpath below Puncak Pasir Malang and must reach the summit, which the young forest hides. The flow is short: resection at the path end, kunci kompas on the summit, then move. The compasman cannot walk on his own: before each move the player sets a number of steps, and the team walks them on the locked bearing. The penerabas stops at every young tree on the line and fells it with the golok; the sweeper behind the compasman pushes the felled trees off the lane; the swept lane is left as bare earth back to the path, and the stringlineman's posts run along it. The player repeats moves until the team comes out on the summit.
+**Marching order and the first move.** The team lines up penerabas, sweeper, compasman, stringlineman. The penerabas and sweeper set off first to open the lane; the compasman and stringlineman only follow once the lane ahead of them is clear (the compasman never walks past a felled tree the sweeper has not cleared yet). This frees the compasman to do one job: watch whether the penerabas is on the bearing. The HUD shows the penerabas' offset in steps and the call to give; in the final mission the player gives it with the Kiri/Kanan 1 langkah buttons.
+
+**Level 5, the summit climb.** The team starts at the end of the footpath below Puncak Pasir Malang and must reach the summit, which the young forest hides. The flow is short: resection at the path end, kunci kompas on the summit, then move. The compasman cannot walk on his own: before each move the player sets a number of steps, and the team walks them on the locked bearing. The penerabas stops at every young tree on the line and fells it with the golok; the sweeper right behind him pushes the felled trees off the lane before the compasman comes up; the compasman calls the penerabas back whenever he drifts a step or more off the line; the swept lane is left as bare earth back to the path, and the stringlineman's posts run along it. The player repeats moves until the team comes out on the summit.
 
 Later levels let the player switch roles, so they understand what each person needs from the compasman. The leg ends when the paced distance is reached (see "Pacing" below); the player then checks they have arrived at the target.
 

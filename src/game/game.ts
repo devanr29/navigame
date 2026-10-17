@@ -795,12 +795,19 @@ export class Game {
     const dev = this.team.cutting ? this.team.deviation() : null;
     g.hidden = dev === null;
     if (dev !== null) {
-      const side = Math.abs(dev) < 1 ? 'lurus di azimut' : `${Math.abs(Math.round(dev))}° ke ${dev > 0 ? 'kanan' : 'kiri'}`;
+      // the compasman sights the penerabas through the locked compass
+      const fix = this.team.correction();
+      const side = Math.abs(dev) < 1 ? 'tepat di azimut' : `${Math.abs(Math.round(dev))}° ke ${dev > 0 ? 'kanan' : 'kiri'}`;
       const needle = el('div', 'gauge-needle');
       needle.style.left = `${50 + Math.max(-45, Math.min(45, dev * 3))}%`;
+      const hint = Math.abs(dev) > 45 ? 'Detour: penerabas keluar dari garis'
+        : fix ? `Aba-aba: jalan ke ${fix.dir < 0 ? 'kiri' : 'kanan'} ${fix.steps} langkah` : 'Penerabas di garis: lurus terus';
       g.replaceChildren(
         el('div', '', `Kompas terkunci ${String(Math.round(this.team.locked ?? 0)).padStart(3, '0')}° · penerabas ${side}`),
         el('div', 'gauge-bar', el('div', 'gauge-mid'), needle),
+        el('div', 'small', hint),
+        ...(this.team.call ? [el('div', 'gauge-call', `Compasman: "${this.team.call}"`)] : []),
+        ...(this.team.waiting ? [el('div', 'small', 'Menunggu penerabas dan sweeper membuka jalur…')] : []),
         ...(this.team.blocked ? [el('div', 'warn', 'Terhalang! Lakukan detour.')] : []),
       );
     }
