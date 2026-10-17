@@ -2,17 +2,34 @@
 // and the player directs the penerabas "kiri", "kanan", "lurus". The penerabas cuts the vegetation
 // ahead, the sweeper widens the cut, the stringlineman leaves a line of posts. The penerabas drifts off
 // line on his own, so the compasman has to keep correcting; a bad direction makes a crooked path.
+// In level 5 the team walks by itself on the locked bearing for the number of steps the compasman
+// sets: the penerabas fells the young trees on the line with his golok, the sweeper behind him clears
+// the felled trees off the lane, and the lane is left as bare earth back to the path.
 import * as THREE from 'three';
 import { BLOCK_M, type WorldData } from '../gen/constants';
 import type { ChunkManager } from '../world/chunks';
 import { makeCharacter, type Character } from '../world/characters';
-import { Stringline } from '../world/objects3d';
+import { Lane, Stringline, youngTree } from '../world/objects3d';
 import { angleDiff, magneticOf, norm360 } from '../tools/sight';
 import type { Player } from '../player/player';
 
 const CUT_SPEED = 2.0 / BLOCK_M; // 2 m/s while cutting a path
 const STEER_RATE = 14; // degrees per second while "kiri"/"kanan" is held
 const GAP = 3.2; // blocks between penerabas and compasman
+const CHOP_TIME = 0.6; // seconds of golok work per young tree
+const FALL_TIME = 0.7; // seconds for a felled tree to fall
+const SWEEP_TIME = 0.9; // seconds for the sweeper to clear a felled tree off the lane
+
+/** A felled tree: falls across the lane edge, then the sweeper pushes it clear. */
+interface Fallen {
+  obj: THREE.Object3D;
+  base: THREE.Vector2;
+  /** Unit vector (x, z) it falls toward and is swept along. */
+  dir: THREE.Vector2;
+  t: number;
+  /** Sweep progress 0..1, or −1 before the sweeper reaches it. */
+  swept: number;
+}
 
 export class Team {
   readonly group = new THREE.Group();
@@ -25,9 +42,21 @@ export class Team {
   locked: number | null = null;
   steer = 0; // −1 left, 0 straight, +1 right
   blocked = false;
-  /** Obstacle cells (thicket) that even the penerabas cannot cut. */
-  hard = new Set<number>();
   stringline = new Stringline();
+  /** Level 5: walk by yourself on the heading (the mission stops it after the set number of steps). */
+  auto = false;
+  /** Level 5: the penerabas fells the trees on the line; the sweeper clears them off the lane. */
+  fell = false;
+  /** Trees felled so far. */
+  felledCount = 0;
+  /** True while the penerabas is chopping (the team waits). */
+  get chopping() { return this.chopTree >= 0; }
+  private chopTree = -1;
+  private chopLeft = 0;
+  private side = 1;
+  private fallen: Fallen[] = [];
+  private lane = new Lane();
+  private lastLane: THREE.Vector2 | null = null;
 
   private members: Record<'penerabas' | 'sweeper' | 'stringlineman', Character>;
   private lead = new THREE.Vector2();
@@ -44,7 +73,7 @@ export class Team {
       stringlineman: makeCharacter('stringlineman'),
     };
     for (const m of Object.values(this.members)) this.group.add(m.group);
-    this.group.add(this.stringline.group);
+    this.group.add(this.stringline.group, this.lane.mesh);
     this.group.visible = false;
   }
 
@@ -53,6 +82,16 @@ export class Team {
     this.group.remove(this.stringline.group);
     this.stringline = new Stringline();
     this.group.add(this.stringline.group);
+    for (const f of this.fallen) this.group.remove(f.obj);
+    this.fallen = [];
+    this.group.remove(this.lane.mesh);
+    this.lane = new Lane();
+    this.group.add(this.lane.mesh);
+    this.lastLane = null;
+    this.chopTree = -1;
+    this.felledCount = 0;
+    this.auto = false;
+    this.fell = false;
     this.active = false;
     this.cutting = false;
     this.steer = 0;
@@ -87,6 +126,8 @@ export class Team {
   }
 
   stopCutting() {
+    this.auto = false;
+    this.chopTree = -1;
     this.cutting = false;
     this.steer = 0;
     this.restartTrail = true;
@@ -114,10 +155,16 @@ export class Team {
     const N = this.w.size;
     this.blocked = false;
 
+    let sweeping = false;
     if (this.cutting) {
       player.carried = true;
-      // the penerabas wanders off the line by himself; the compasman corrects
-      if (forward > 0.05) {
+      // Walking by itself (level 5) the team keeps the locked heading; under the joystick the penerabas
+      // wanders off the line by himself and the compasman corrects.
+      if (this.auto) {
+        forward = 1;
+      } else if (this.fell) {
+        forward = 0; // level 5: the team only moves for the steps the compasman set
+      } else if (forward > 0.05) {
         this.drift += (Math.random() - 0.5) * dt * 7;
         this.drift *= 1 - Math.min(1, dt * 0.4);
         this.drift = Math.max(-3, Math.min(3, this.drift));
@@ -126,13 +173,31 @@ export class Team {
         this.heading = norm360(this.heading + this.steer * STEER_RATE * dt);
       }
       const r = (this.heading * Math.PI) / 180;
-      const step = CUT_SPEED * forward * dt;
+      let step = CUT_SPEED * forward * dt;
+      if (this.fell && step > 0) {
+        // a trunk on the lane just ahead: stop and fell it with the golok
+        if (this.chopTree < 0) {
+          const fx = Math.sin(r), fz = -Math.cos(r), rx = Math.cos(r), rz = Math.sin(r);
+          outer: for (const a of [0.7, 1.4]) {
+            for (const l of [0, -0.7, 0.7]) {
+              const i = this.chunks.treeIn(this.lead.x + fx * a + rx * l, this.lead.y + fz * a + rz * l);
+              if (i >= 0) { this.chopTree = i; this.chopLeft = CHOP_TIME; break outer; }
+            }
+          }
+        }
+        if (this.chopTree >= 0) {
+          step = 0;
+          this.chopLeft -= dt;
+          if (this.chopLeft <= 0) this.fellTree(this.chopTree, r);
+        }
+      }
       if (step > 0) {
         const nx = this.lead.x + Math.sin(r) * step;
         const nz = this.lead.y - Math.cos(r) * step;
         // Look a little ahead so the penerabas stops short of an obstacle, leaving room to turn and detour.
         const ax = nx + Math.sin(r) * 1.3, az = nz - Math.cos(r) * 1.3;
-        if (this.passable(this.lead.x, this.lead.y, nx, nz) && this.passable(nx, nz, ax, az)) {
+        const mx = nx + Math.sin(r) * 0.65, mz = nz - Math.cos(r) * 0.65;
+        if (this.passable(this.lead.x, this.lead.y, nx, nz) && this.passable(nx, nz, mx, mz) && this.passable(mx, mz, ax, az)) {
           this.lead.set(nx, nz);
           // penerabas cuts the cell ahead; sweeper widens to both sides
           this.chunks.clearBush(nx + Math.sin(r) * 0.8, nz - Math.cos(r) * 0.8);
@@ -148,6 +213,7 @@ export class Team {
       // compasman (player) walks GAP behind the penerabas on the cut path
       const pp = this.pointBehind(GAP);
       player.carryTo(pp.x, pp.y);
+      if (this.fell) sweeping = this.updateFallen(dt);
     } else {
       player.carried = false;
       // follow the player: the player's own trail becomes the path
@@ -178,7 +244,8 @@ export class Team {
       c.group.position.set(p.x, y, p.y);
       const mv = Math.hypot(p.x - prev.x, p.y - prev.z);
       if (mv > 0.002) c.group.rotation.y = Math.atan2(-(p.x - prev.x), -(p.y - prev.z));
-      c.animate(dt, Math.min(2, mv / Math.max(dt, 1e-3)));
+      if ((c === this.members.penerabas && this.chopTree >= 0) || (c === this.members.sweeper && sweeping)) c.work(dt);
+      else c.animate(dt, Math.min(2, mv / Math.max(dt, 1e-3)));
     }
     if (!this.cutting) {
       // when following, the penerabas walks beside the player, facing the same way
@@ -197,6 +264,51 @@ export class Team {
     }
     void N;
     void time;
+  }
+
+  /** The penerabas fells tree `i` (index into w.trees): it falls forward and to one side of the lane. */
+  private fellTree(i: number, r: number) {
+    const t = this.w.trees;
+    this.chunks.fellTree(i);
+    this.chopTree = -1;
+    this.felledCount++;
+    this.side = -this.side;
+    const dir = new THREE.Vector2(Math.sin(r) * 0.5 + Math.cos(r) * this.side, -Math.cos(r) * 0.5 + Math.sin(r) * this.side).normalize();
+    const obj = youngTree(t[i + 3]);
+    obj.position.set(t[i], t[i + 2], t[i + 1]);
+    this.group.add(obj);
+    this.fallen.push({ obj, base: new THREE.Vector2(t[i], t[i + 1]), dir, t: 0, swept: -1 });
+  }
+
+  /**
+   * Felled trees fall, then the sweeper (walking behind the compasman) pushes each one off the lane
+   * and the swept lane is laid down as bare earth. Returns true while the sweeper is at work.
+   */
+  private updateFallen(dt: number): boolean {
+    const sw = this.pointBehind(GAP + 1.8);
+    let busy = false;
+    for (const f of this.fallen) {
+      f.t += dt;
+      const k = Math.min(1, f.t / FALL_TIME);
+      const axis = new THREE.Vector3(f.dir.y, 0, -f.dir.x);
+      f.obj.quaternion.setFromAxisAngle(axis, 1.45 * k * k);
+      if (k < 1) continue;
+      if (f.swept < 0 && sw.distanceTo(f.base) < 2.2) f.swept = 0;
+      if (f.swept >= 0 && f.swept < 1) {
+        busy = true;
+        f.swept = Math.min(1, f.swept + dt / SWEEP_TIME);
+        const e = f.swept * (2 - f.swept);
+        const x = f.base.x + f.dir.x * 2.2 * e, z = f.base.y + f.dir.y * 2.2 * e;
+        f.obj.position.set(x, this.groundAt(x, z), z);
+      }
+    }
+    if (!this.lastLane || this.lastLane.distanceTo(sw) >= 0.5) {
+      const prev = this.lastLane ?? sw;
+      const h = prev === sw ? this.heading : (Math.atan2(sw.x - prev.x, -(sw.y - prev.y)) * 180) / Math.PI;
+      this.lane.add(sw.x, this.groundAt(sw.x, sw.y), sw.y, h);
+      this.lastLane = sw.clone();
+    }
+    return busy;
   }
 
   /** Point on the path `d` blocks behind its end (negative = ahead of the end, along the last direction). */
@@ -229,7 +341,6 @@ export class Team {
     const N = this.w.size;
     if (x < 1 || z < 1 || x > N - 1 || z > N - 1) return false;
     const i = Math.floor(z) * N + Math.floor(x);
-    if (this.hard.has(i)) return false;
     if (this.w.water[i] >= 0 && this.w.deck[i] < 0) return false; // cannot cut across a river
     // The team scrambles up to two blocks (5 m) like a player jumping; higher walls need a detour.
     const h0 = this.groundAt(x0, z0);

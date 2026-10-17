@@ -8,7 +8,7 @@ self.onmessage = (e: MessageEvent<{ seed: string }>) => {
   const sites = findSites(world);
   const transfer = [
     world.heightF.buffer, world.height.buffer, world.water.buffer, world.deck.buffer,
-    world.solid.buffer, world.surface.buffer, world.zone.buffer, world.trees.buffer,
+    world.solid.buffer, world.surface.buffer, world.zone.buffer, world.trees.buffer, world.summitForest.buffer,
   ];
   (self as unknown as Worker).postMessage({ type: 'done', world, sites }, transfer);
 };

@@ -16,6 +16,8 @@ const boxGeo = unitBox();
 interface Chunk {
   group: THREE.Group;
   detail: THREE.Object3D[];
+  /** Tree and bush meshes (rebuilt when the vegetation is restored). */
+  trees: THREE.Object3D[];
   cx: number;
   cz: number;
 }
@@ -30,14 +32,22 @@ export class ChunkManager {
   /** 1 where an uncut bush (undergrowth) stands. The penerabas and sweeper clear them. */
   readonly bushGrid: Uint8Array;
   private bushInst = new Map<number, { mesh: THREE.InstancedMesh; k: number }>();
+  /** Per cell: index into w.trees of the tree (not bush) standing there, or −1. */
+  private treeAt: Int32Array;
+  /** Trees felled by the penerabas (indices into w.trees), hidden until the vegetation is restored. */
+  private felled = new Set<number>();
+  private treeInst = new Map<number, { mesh: THREE.InstancedMesh; k: number }[]>();
 
   constructor(private w: WorldData) {
     this.nC = Math.ceil(w.size / CHUNK);
     this.treeBuckets = Array.from({ length: this.nC * this.nC }, () => []);
     const t = w.trees;
     this.bushGrid = new Uint8Array(w.size * w.size);
+    this.treeAt = new Int32Array(w.size * w.size).fill(-1);
     for (let i = 0; i < t.length; i += 6) {
-      if (t[i + 5] === 2) this.bushGrid[Math.floor(t[i + 1]) * w.size + Math.floor(t[i])] = 1;
+      const cell = Math.floor(t[i + 1]) * w.size + Math.floor(t[i]);
+      if (t[i + 5] === 2) this.bushGrid[cell] = 1;
+      else this.treeAt[cell] = i;
       const cx = Math.floor(t[i] / CHUNK);
       const cz = Math.floor(t[i + 1] / CHUNK);
       this.treeBuckets[cz * this.nC + cx].push(i);
@@ -92,9 +102,9 @@ export class ChunkManager {
       wm.renderOrder = 1;
       group.add(wm);
     }
-    const detail = this.buildTrees(group, this.treeBuckets[cz * this.nC + cx]);
+    const { detail, all } = this.buildTrees(group, this.treeBuckets[cz * this.nC + cx]);
     this.root.add(group);
-    this.chunks.set(cz * this.nC + cx, { group, detail, cx, cz });
+    this.chunks.set(cz * this.nC + cx, { group, detail, trees: all, cx, cz });
     this.built++;
   }
 
@@ -115,6 +125,47 @@ export class ChunkManager {
     return true;
   }
 
+  /** The standing tree whose trunk is in this cell: index into w.trees, or −1. */
+  treeIn(x: number, z: number): number {
+    const N = this.w.size;
+    const xi = Math.floor(x), zi = Math.floor(z);
+    if (xi < 0 || zi < 0 || xi >= N || zi >= N) return -1;
+    const i = this.treeAt[zi * N + xi];
+    return i >= 0 && !this.felled.has(i) ? i : -1;
+  }
+
+  /** Fells a tree (index into w.trees): hides it and frees its cell. */
+  fellTree(i: number) {
+    if (this.felled.has(i)) return;
+    this.felled.add(i);
+    const t = this.w.trees;
+    this.w.solid[Math.floor(t[i + 1]) * this.w.size + Math.floor(t[i])] = 0;
+    for (const { mesh, k } of this.treeInst.get(i) ?? []) {
+      mesh.setMatrixAt(k, new THREE.Matrix4().makeScale(0, 0, 0));
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    this.treeInst.delete(i);
+  }
+
+  /** Puts back every felled tree and cut bush (a fresh forest for the next mission). */
+  restoreVegetation() {
+    const t = this.w.trees, N = this.w.size;
+    for (const i of this.felled) this.w.solid[Math.floor(t[i + 1]) * N + Math.floor(t[i])] = 1;
+    this.felled.clear();
+    for (let i = 0; i < t.length; i += 6) if (t[i + 5] === 2) this.bushGrid[Math.floor(t[i + 1]) * N + Math.floor(t[i])] = 1;
+    for (const c of this.chunks.values()) {
+      for (const o of c.trees) {
+        c.group.remove(o);
+        (o as THREE.InstancedMesh).dispose();
+      }
+      const near = c.detail.length ? c.detail[0].visible : false;
+      const { detail, all } = this.buildTrees(c.group, this.treeBuckets[c.cz * this.nC + c.cx]);
+      for (const o of detail) o.visible = near;
+      c.detail = detail;
+      c.trees = all;
+    }
+  }
+
   private unload(key: number, c: Chunk) {
     this.root.remove(c.group);
     c.group.traverse((o) => {
@@ -124,9 +175,9 @@ export class ChunkManager {
     this.chunks.delete(key);
   }
 
-  private buildTrees(group: THREE.Group, list: number[]): THREE.Object3D[] {
+  private buildTrees(group: THREE.Group, list: number[]): { detail: THREE.Object3D[]; all: THREE.Object3D[] } {
     const t = this.w.trees;
-    const trees = list.filter((i) => t[i + 5] !== 2);
+    const trees = list.filter((i) => t[i + 5] !== 2 && !this.felled.has(i));
     const N = this.w.size;
     const bushes = list.filter((i) => t[i + 5] === 2 && this.bushGrid[Math.floor(t[i + 1]) * N + Math.floor(t[i])]);
     const m = new THREE.Matrix4();
@@ -135,6 +186,7 @@ export class ChunkManager {
     const p = new THREE.Vector3();
     const c = new THREE.Color();
     const detail: THREE.Object3D[] = [];
+    const all: THREE.Object3D[] = [];
 
     const make = (count: number, fill: (k: number) => void) => {
       const mesh = new THREE.InstancedMesh(boxGeo, treeMat, count);
@@ -145,11 +197,12 @@ export class ChunkManager {
       }
       mesh.computeBoundingSphere();
       group.add(mesh);
+      all.push(mesh);
       return mesh;
     };
 
     if (trees.length) {
-      make(trees.length, (k) => {
+      const canopy = make(trees.length, (k) => {
         const i = trees[k];
         const big = t[i + 4] === 5;
         const ch = big ? 3 : 2;
@@ -160,13 +213,15 @@ export class ChunkManager {
         if (t[i + 5] === 1) c.setRGB(0.2 + v, 0.42 + v, 0.18 + v * 0.5);
         else c.setRGB(0.3 + v, 0.55 + v, 0.24 + v * 0.5);
       });
-      detail.push(make(trees.length, (k) => {
+      const trunks = make(trees.length, (k) => {
         const i = trees[k];
         p.set(t[i], t[i + 2], t[i + 1]);
         s.set(0.4, t[i + 3] + 0.2, 0.4);
         m.compose(p, q, s);
         c.setRGB(0.42, 0.29, 0.17);
-      }));
+      });
+      detail.push(trunks);
+      trees.forEach((i, k) => this.treeInst.set(i, [{ mesh: canopy, k }, { mesh: trunks, k }]));
     }
     if (bushes.length) {
       const bm = make(bushes.length, (k) => {
@@ -180,7 +235,7 @@ export class ChunkManager {
       bushes.forEach((i, k) => this.bushInst.set(Math.floor(t[i + 1]) * N + Math.floor(t[i]), { mesh: bm, k }));
       detail.push(bm);
     }
-    return detail;
+    return { detail, all };
   }
 }
 

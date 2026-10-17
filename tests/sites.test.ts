@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateWorld } from '../src/gen/world';
 import { findSites } from '../src/game/sites';
-import { Zone } from '../src/gen/constants';
+import { Surface, Zone } from '../src/gen/constants';
 import { Sight, smokeTarget } from '../src/tools/sight';
 
 describe.each(['jamadagni', 'navter', '42'])('mission sites for seed %s', (seed) => {
@@ -25,10 +25,30 @@ describe.each(['jamadagni', 'navter', '42'])('mission sites for seed %s', (seed)
     }
   });
 
-  it('forest targets are inside the forest', () => {
-    expect(w.zone[at(s.forest.target)]).toBe(Zone.Forest);
+  it('the final target is inside the big forest', () => {
     expect(w.zone[at(s.final.target)]).toBe(Zone.Forest);
-    expect(w.zone[at(s.forest.start)]).toBe(Zone.Open);
+    expect(w.summitForest[at(s.final.target)]).toBe(0);
+  });
+
+  it('level 5: the summit is hidden from the path end, resection works there, the climb is walkable', () => {
+    const { start, target } = s.summit;
+    expect(w.zone[at(start)]).toBe(Zone.Open);
+    expect(w.surface[at(start)]).toBe(Surface.Path);
+    const seen = sight.visibleLandmarks(start[0], eye(start), start[1], 420);
+    const summit = w.landmarks.findIndex((l) => l.name === 'Puncak Pasir Malang');
+    expect(seen).not.toContain(summit);
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    const L = Math.hypot(target[0] - start[0], target[1] - start[1]);
+    let prev = w.height[at(start)], forest = 0, n = 0;
+    for (let t = 0.5; t < L - 1; t += 0.5) {
+      const p: [number, number] = [start[0] + ((target[0] - start[0]) * t) / L, start[1] + ((target[1] - start[1]) * t) / L];
+      expect(w.water[at(p)]).toBe(-1);
+      expect(Math.abs(w.height[at(p)] - prev)).toBeLessThanOrEqual(2);
+      prev = w.height[at(p)];
+      n++;
+      if (w.summitForest[at(p)]) forest++;
+    }
+    expect(forest / n).toBeGreaterThan(0.75);
   });
 
   it('the smoke is visible from both intersection posts', () => {

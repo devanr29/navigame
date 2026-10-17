@@ -322,6 +322,7 @@ export class Game {
         this.compass.locked = az;
         this.team.locked = az;
       },
+      restoreVegetation: () => this.chunks.restoreVegetation(),
       relocate: (x, z, faceAz) => {
         this.devTeleport(x, z);
         this.player.teleport(x, z, faceAz);
@@ -420,7 +421,7 @@ export class Game {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 12);
       camera.updateProjectionMatrix();
     }
-    player.frozen = this.compass.raised || this.notebook.isOpen();
+    player.frozen = this.compass.raised || this.notebook.isOpen() || (!!m?.holdPlayer && !player.flying);
     player.lookScale = camera.fov / 70;
 
     // team (navtup): joystick forward or W moves the team along the penerabas heading

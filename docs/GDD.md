@@ -56,6 +56,7 @@ The world and the map come from one seeded heightmap, so every contour, ridge an
 - Peaks and saddles, lembahan and punggungan, rivers and river junctions.
 - A trail and road network with bends and crossroads, used for navter routes.
 - Titik ekstrem: peaks (puncak, including a named summit in the far corner from the forest), a radio tower, a hut, a bridge, road bends, junctions. Each one appears on the map with its own symbol. Trees are not titik ekstrem.
+- Summit forest: a wedge of dense young forest on one flank of Puncak Pasir Malang, from just below its open summit down to the end of a dead-end footpath (level 5). The path end is chosen so two or three titik ekstrem are in view there for a resection, the summit is hidden behind the trees, and the straight line up is dry and climbable.
 - Roads (jalan): the through-route from the west edge over both crossroads and the bridge to the south edge is a road, wider than a footpath, with a gravel surface in the world and a double line on the map. The branches stay footpaths (jalan setapak). The road gives a clear line to plan a navter route along.
 
 **Visibility is the switch between the two navigation types:**
@@ -203,17 +204,19 @@ In navtup, no landmark is visible, so resection is impossible. The team plots on
 | Sweeper | Clears leftover vegetation still blocking the path | NPC that widens the cut; a skipped sweep slows the team. |
 | Stringlineman | Places stringline markers along the path | NPC that leaves a visible line. The player can follow it back if they need to retreat. |
 
+**Level 5, the summit climb.** The team starts at the end of the footpath below Puncak Pasir Malang and must reach the summit, which the young forest hides. The flow is short: resection at the path end, kunci kompas on the summit, then move. The compasman cannot walk on his own: before each move the player sets a number of steps, and the team walks them on the locked bearing. The penerabas stops at every young tree on the line and fells it with the golok; the sweeper behind the compasman pushes the felled trees off the lane; the swept lane is left as bare earth back to the path, and the stringlineman's posts run along it. The player repeats moves until the team comes out on the summit.
+
 Later levels let the player switch roles, so they understand what each person needs from the compasman. The leg ends when the paced distance is reached (see "Pacing" below); the player then checks they have arrived at the target.
 
 ## Additions beyond the material
 
-These three topics are not in the PPA Jamadagni summary but cause common beginner mistakes, so the game teaches them inside the navigasi tertutup level (level 5): calibrate the pace count first, then correct the declination before locking the compass, then detour around an obstacle on the leg. Check each against your instructors' practice before teaching it.
+These three topics are not in the PPA Jamadagni summary but cause common beginner mistakes. Level 5 was reworked into the summit climb (resection, kunci kompas, move), so it no longer runs the pace calibration, the declination exercise or the detour; pacing still matters there, because each move is a step count. Check each topic against your instructors' practice before teaching it.
 
 ### 1. Magnetic declination
 
 The compass points to magnetic north, while the map's grid points to grid north. The angle between them is the declination, shown in the map legend.
 
-- **Game rule:** early levels use 0° declination. The navigasi tertutup level introduces a non-zero value in the legend, and every azimuth must be corrected when moving between compass and map.
+- **Game rule:** every level currently uses 0° declination. The game still supports a non-zero value in the legend (every azimuth must then be corrected when moving between compass and map), for a future level.
 - **Why it matters, shown in game:** after a 1 km leg, a 1° error puts the player about 17 m off target; a 5° error, about 87 m. The game draws the drift on the map after the leg.
 - **Note for Indonesia:** real declination is small (around 1° or less in much of the country), so the practice level may use an exaggerated value to make the effect visible. Say so on screen.
 
@@ -221,8 +224,8 @@ The compass points to magnetic north, while the map's grid points to grid north.
 
 In navtup there are no landmarks to confirm progress, so distance must be counted.
 
-- **Calibration:** at the start of the navigasi tertutup level the player walks a marked 100 m course and the game records their pace count (steps per 100 m).
-- **In navtup:** the player converts the plotted map distance to metres, then to a target pace count. A tally counter on screen tracks progress, like pace beads.
+- **Calibration:** the player's pace count (steps per 100 m) defaults to 133, a 0.75 m stride on flat ground. A recorded calibration from an earlier version of the game is still used if present.
+- **In navtup:** the player converts the plotted map distance to metres, then to a target pace count (in level 5, the step count of each move). A tally counter on screen tracks progress, like pace beads.
 - **Terrain effect:** uphill slopes and thick vegetation shorten each step, so the same 100 m takes more steps. The game models this, and the debrief shows how far off the count was.
 
 ### 3. Error recovery
@@ -235,7 +238,7 @@ The game lets players make mistakes and teaches what to do next.
 
 ## Progression and levels
 
-Six levels introduce the skills in field order and end with a combined navter-to-navtup mission. Missions that repeated an earlier one were merged so a full run fits a class: orienting is part of the resection level, and declination, pacing and detours are taught inside the navigasi tertutup level.
+Six levels introduce the skills in field order and end with a combined navter-to-navtup mission. Missions that repeated an earlier one were merged so a full run fits a class: orienting is part of the resection level.
 
 | Level | Focus | New mechanic | Pass condition |
 |---|---|---|---|
@@ -243,7 +246,7 @@ Six levels introduce the skills in field order and end with a combined navter-to
 | 2 | Orienting and resection | Utarakan peta, orientasi medan, compass sighting, back azimuth, line drawing | Map oriented; position error under a set distance |
 | 3 | Intersection | Azimuth from two known points | Object located within a set distance |
 | 4 | Navter route | Track planning, crossroad checks | Report arrival at the post; every crossroad identified correctly |
-| 5 | Navtup | Pace calibration (100 m), non-zero declination, plotting, kunci kompas, four roles, stringline, detour | Reach the target through dense forest after a detour |
+| 5 | Navtup: the summit climb | Resection at the end of a footpath, kunci kompas on a hidden summit, moves by step count, penerabas felling trees, sweeper clearing the lane | Reach the summit; resection error under 100 m |
 | 6 | Final mission | Open terrain to forest edge, then navtup to target | Full flow completed, with a final score |
 
 **Scoring:** position error in metres, accuracy of each azimuth, and time. Checking position is never penalized, because frequent checking is the habit the game is teaching.

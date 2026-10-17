@@ -16,6 +16,8 @@ const HILL_NAMES = ['Bukit Pasir Angin', 'Bukit Tenjo', 'Bukit Cikoneng', 'Bukit
 
 const MAIN_HALF_W = 3; // main river channel half-width in blocks (about 15 m wide)
 const TRIB_HALF_W = 1.5;
+/** Level 5 climb: blocks (175–225 m) from the end of the summit footpath to the top of Puncak Pasir Malang. */
+const SUMMIT_LEGS = [80, 70, 90];
 
 export function generateWorld(seed: string, onProgress: Progress = () => {}): WorldData {
   const N = WORLD_SIZE;
@@ -258,23 +260,117 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     rasterTrail(poly, road);
     onProgress('Membuka jalan setapak', (k + 1) / (routes.length + 1));
   });
-  // A footpath up Puncak Pasir Malang, joining the network at a junction of its own away from J1 / J2,
-  // so the summit can be walked to and the map shows a third, unnamed fork to tell apart.
+  // Summit forest (level 5): a wedge of young forest on one flank of Puncak Pasir Malang, from just
+  // below the open summit down to the end of a dead-end footpath. From the path end the summit cannot be
+  // seen, so the climb is navtup: resection at the path end, then a locked bearing up through the trees.
+  // The footpath joins the network at a junction of its own away from J1 / J2, so the map also shows a
+  // third, unnamed fork to tell apart.
+  const summitForest = new Uint8Array(NN);
+  let trailhead: P = [lone[0] + 0.5, lone[1] + 0.5 + SUMMIT_LEGS[0]];
+  let leg = SUMMIT_LEGS[0];
   {
-    let best = Infinity;
-    let join: P | null = null;
-    for (const w of [...roads, ...trails]) {
-      for (let k = 0; k < w.length / 2; k++) {
-        const p: P = [w[k * 2], w[k * 2 + 1]];
-        if (d2(p[0], p[1], J1) < 50 * 50 || d2(p[0], p[1], J2) < 50 * 50 || d2(p[0], p[1], E1) < 30 * 30) continue;
-        const i = Math.floor(p[1]) * N + Math.floor(p[0]);
-        if (water[i] >= 0 || deck[i] >= 0) continue;
-        const d = d2(p[0], p[1], lone);
-        if (d < best) { best = d; join = p; }
+    const sc: P = [lone[0] + 0.5, lone[1] + 0.5];
+    const wayPts: P[] = [];
+    for (const w of [...roads, ...trails]) for (let k = 0; k < w.length / 2; k += 2) wayPts.push([w[k * 2], w[k * 2 + 1]]);
+    const joinable = wayPts.filter((p) => {
+      const i = Math.floor(p[1]) * N + Math.floor(p[0]);
+      return d2(p[0], p[1], J1) >= 50 * 50 && d2(p[0], p[1], J2) >= 50 * 50 && d2(p[0], p[1], E1) >= 30 * 30 && water[i] < 0 && deck[i] < 0;
+    });
+    // The resection at the path end needs titik ekstrem in view: sight points of the other landmarks,
+    // checked against the terrain and the big forest's canopy (trees are planted later).
+    const marks: [number, number, number][] = [
+      [peak[0] + 0.5, sampleH(peak[0], peak[1]) + 2, peak[1] + 0.5],
+      [tower[0] + 0.5, sampleH(tower[0], tower[1]) + 20, tower[1] + 0.5],
+      [hutC[0], sampleH(hutC[0], hutC[1]) + 1.5, hutC[1]],
+      [bc[0], bLevel + 1.5, bc[1]],
+      [tugu[0] + 0.5, sampleH(tugu[0], tugu[1]) + 3, tugu[1] + 0.5],
+      ...hilltops.map((h): [number, number, number] => [h[0] + 0.5, sampleH(h[0], h[1]) + 2, h[1] + 0.5]),
+    ];
+    // Same test as the compass sighting (integer columns), with the path end's pad already levelled.
+    const col = (i: number) => Math.floor(heightF[i] + 0.5);
+    const sees = (e: P, m: [number, number, number]) => {
+      const ec = Math.floor(e[1]) * N + Math.floor(e[0]);
+      const ey = col(ec) + 0.68;
+      const dx = m[0] - e[0], dy = m[1] - ey, dz = m[2] - e[1];
+      const len = Math.hypot(dx, dy, dz);
+      if (Math.hypot(dx, dz) > 400) return false;
+      for (let k = 2; k * 0.25 < len - 1.5; k++) {
+        const f = (k * 0.25) / len;
+        const x = e[0] + dx * f, z = e[1] + dz * f, y = ey + dy * f;
+        if (Math.abs(x - e[0]) < 1.5 && Math.abs(z - e[1]) < 1.5) continue;
+        const i = Math.floor(z) * N + Math.floor(x);
+        const h = col(i);
+        if (y < h || (zone[i] === Zone.Forest && y < h + 8)) return false;
+        // a lone tree's canopy in the open (same rule as the planting below)
+        if (y > h + 1.5 && y < h + 4.5) {
+          const cx = Math.floor(x), cz = Math.floor(z);
+          for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) if (cellRand(cx + ox, cz + oz, 11) < 0.005) return false;
+        }
+      }
+      return true;
+    };
+    let best = -Infinity;
+    let dir: P = [0, 1];
+    for (let a = 0; a < 48 * SUMMIT_LEGS.length; a++) {
+      const L = SUMMIT_LEGS[Math.floor(a / 48)];
+      const ang = (a / 48) * Math.PI * 2;
+      const ux = Math.sin(ang), uz = -Math.cos(ang);
+      const th: P = [Math.floor(sc[0] + ux * L) + 0.5, Math.floor(sc[1] + uz * L) + 0.5];
+      if (!inside(th[0] - 8, th[1] - 8) || !inside(th[0] + 8, th[1] + 8)) continue;
+      const ti = Math.floor(th[1]) * N + Math.floor(th[0]);
+      if (water[ti] >= 0 || zone[ti] === Zone.Forest || trailMask[ti]) continue;
+      // a dry climb the team can make: it scrambles up to two blocks from cell to cell
+      let ok = true;
+      let prev = Math.floor(heightF[ti] + 0.5);
+      for (let t = L; t >= 2 && ok; t -= 0.5) {
+        const i = Math.floor(sc[1] + uz * t) * N + Math.floor(sc[0] + ux * t);
+        const h = Math.floor(heightF[i] + 0.5);
+        if (water[i] >= 0 || Math.abs(h - prev) > 2) ok = false;
+        prev = h;
+      }
+      if (!ok) continue;
+      // Rather no way through the wedge: a way in the forest leaves a lane with nothing to cut.
+      const wayIn = wayPts.some((q) => {
+        const dx = q[0] - sc[0], dz = q[1] - sc[1], d = Math.hypot(dx, dz);
+        return d > 9 && d < L && (dx * ux + dz * uz) / d > Math.cos((55 * Math.PI) / 180);
+      });
+      // Prefer two or three titik ekstrem crossing near 90° (landmarks behind the summit are hidden
+      // by the wedge), then a short new footpath.
+      const azs = marks
+        .filter((m) => (m[0] - th[0]) * -ux + (m[2] - th[1]) * -uz < Math.cos((60 * Math.PI) / 180) * Math.hypot(m[0] - th[0], m[2] - th[1]) && sees(th, m))
+        .map((m) => Math.atan2(m[0] - th[0], -(m[2] - th[1])));
+      let q = 0;
+      for (let i = 0; i < azs.length; i++) for (let j = i + 1; j < azs.length; j++) {
+        const d = Math.abs(((((azs[i] - azs[j]) * 180) / Math.PI) % 360 + 540) % 360 - 180);
+        q = Math.max(q, 90 - Math.abs(90 - d));
+      }
+      let dWay = Infinity;
+      for (const p of joinable) dWay = Math.min(dWay, Math.hypot(p[0] - th[0], p[1] - th[1]));
+      const score = (q >= 30 ? 200 : 0) + (azs.length >= 3 ? 100 : 0) + q + 25 * Math.min(4, azs.length) - 0.3 * dWay - (wayIn ? 60 : 0);
+      if (score > best) { best = score; trailhead = th; dir = [ux, uz]; leg = L; }
+    }
+    const R = leg + 8;
+    for (let z = Math.floor(sc[1] - R); z <= sc[1] + R; z++) {
+      for (let x = Math.floor(sc[0] - R); x <= sc[0] + R; x++) {
+        if (!inside(x, z)) continue;
+        const i = z * N + x;
+        const dx = x + 0.5 - sc[0], dz = z + 0.5 - sc[1];
+        const d = Math.hypot(dx, dz);
+        if (d < 9 || water[i] >= 0 || trailMask[i]) continue;
+        const ang = (Math.acos(Math.max(-1, Math.min(1, (dx * dir[0] + dz * dir[1]) / d))) * 180) / Math.PI;
+        const n = fbm(nForest, x / 40, z / 40, 2);
+        // the lower edge stops 1–6 blocks short of the path end; 2 = the dense outer band
+        const edge = leg - 3.5 + n * 2.5;
+        if (d <= edge && ang <= 45 + n * 10) { zone[i] = Zone.Forest; summitForest[i] = d > edge - 6 ? 2 : 1; }
       }
     }
-    if (join && best > 25 * 25) {
-      const cells = astar([lone[0] + 0.5, lone[1] + 2.5], join);
+    const tc: P = [Math.floor(trailhead[0]), Math.floor(trailhead[1])];
+    flatten(tc, 1);
+    let join: P | null = null;
+    let bj = Infinity;
+    for (const q of joinable) { const d = d2(q[0], q[1], trailhead); if (d < bj) { bj = d; join = q; } }
+    if (join) {
+      const cells = astar([tc[0] + 0.5, tc[1] + 0.5], join);
       if (cells.length >= 2) {
         const poly = smoothCells(cells);
         poly.push(join[0], join[1]); // meet the way exactly, so the fork is clean on the map
@@ -319,7 +415,15 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
       if (landmarkPts.some((p) => d2(x, z, p) < 49)) continue;
       const r = cellRand(x, z, 11);
       const y = height[i];
-      if (zone[i] === Zone.Forest) {
+      if (summitForest[i]) {
+        // young trees, close together: thin enough for the penerabas to fell with a golok
+        if (r < (summitForest[i] === 2 ? 0.4 : 0.2)) {
+          treeList.push(x + 0.5, z + 0.5, y, 2 + Math.floor(cellRand(x, z, 13) * 2), 3, 1);
+          solid[i] = 1;
+        } else if (r < 0.32) {
+          treeList.push(x + 0.5, z + 0.5, y, 0, 1, 2);
+        }
+      } else if (zone[i] === Zone.Forest) {
         if (r < 0.1) {
           const big = cellRand(x, z, 12) < 0.25;
           treeList.push(x + 0.5, z + 0.5, y, 2 + Math.floor(cellRand(x, z, 13) * 2) + (big ? 1 : 0), big ? 5 : 3, 1);
@@ -356,6 +460,8 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     roads,
     trails,
     junctions: [J1, J2],
+    summitForest,
+    trailhead,
     landmarks,
     spawn,
   };
@@ -546,6 +652,8 @@ export function generateWorld(seed: string, onProgress: Progress = () => {}): Wo
     for (let i = 0; i < NN; i++) {
       const m = trailMask[i];
       if (!m || water[i] >= 0 || deck[i] >= 0 || solid[i] || wayW[i] === 0) continue;
+      // The summit footpath ends on natural ground, not in a cut, so the resection there sees out.
+      if (d2(i % N, (i - (i % N)) / N, trailhead) < 36) continue;
       const lvl = waySum[i] / wayW[i];
       heightF[i] = m === 2 ? (heightF[i] + lvl) / 2 : lvl;
       if (m !== 2) lev[i] = 1;

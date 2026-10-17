@@ -1,6 +1,7 @@
 // Mission locations, chosen from the generated world so every seed gets working missions:
 // spots where enough landmarks are visible for resection, an intersection setup where a smoke column
-// can be seen from two known posts, forest legs for navtup, and a flat trail stretch for pacing.
+// can be seen from two known posts, the summit climb through the young forest, and a forest leg for the
+// final mission.
 // Deterministic: same seed, same sites. Runs in the generation worker.
 import { BLOCK_M, Surface, Zone, type WorldData } from '../gen/constants';
 import { hashString, makeRng } from '../gen/noise';
@@ -15,10 +16,8 @@ export interface Sites {
   route: { start: P; dest: P; crossroads: P[] };
   /** Level 3: smoke column seen from two posts with known coordinates. */
   intersection: { a: P; b: P; smoke: P };
-  /** Level 5: a 100 m stretch of flat trail for the pace calibration. */
-  pace: { start: P; end: P };
-  /** Level 5: from the forest edge through the forest. */
-  forest: { start: P; target: P; obstacle: P };
+  /** Level 5: from the end of the footpath up through the summit forest to the top of Puncak Cadas. */
+  summit: { start: P; target: P };
   /** Level 6: open start (resection), then through the forest to the target. */
   final: { start: P; target: P };
 }
@@ -82,8 +81,9 @@ export function findSites(w: WorldData): Sites {
     }
     return d;
   };
-  const toForest = distTo((i) => w.zone[i] === Zone.Forest);
-  const toOpen = distTo((i) => w.zone[i] === Zone.Open);
+  // The summit forest belongs to level 5; the final mission uses the big forest only.
+  const toForest = distTo((i) => w.zone[i] === Zone.Forest && !w.summitForest[i]);
+  const toOpen = distTo((i) => w.zone[i] === Zone.Open || w.summitForest[i] === 1);
 
   // ---- scan open spots once (every 16 blocks) for visible landmarks
   interface Spot { x: number; z: number; ids: number[]; q: number }
@@ -151,7 +151,7 @@ export function findSites(w: WorldData): Sites {
         const t: P = [s[0] + Math.sin(ang) * L, s[1] - Math.cos(ang) * L];
         if (!inside(t[0], t[1], 10)) continue;
         const ti = idx(t[0], t[1]);
-        if (w.zone[ti] !== Zone.Forest || toOpen[ti] < 12 || w.water[ti] >= 0) continue;
+        if (w.zone[ti] !== Zone.Forest || w.summitForest[ti] || toOpen[ti] < 12 || w.water[ti] >= 0) continue;
         if (!legOk(s, t)) continue;
         out.push({ start: s, target: [Math.floor(t[0]) + 0.5, Math.floor(t[1]) + 0.5] });
         break;
@@ -181,7 +181,7 @@ export function findSites(w: WorldData): Sites {
         const t: P = [c[0] + Math.sin(ang) * L, c[1] - Math.cos(ang) * L];
         if (!inside(t[0], t[1], 10)) continue;
         const ti = idx(t[0], t[1]);
-        if (w.zone[ti] !== Zone.Forest || toOpen[ti] < 12 || w.water[ti] >= 0) continue;
+        if (w.zone[ti] !== Zone.Forest || w.summitForest[ti] || toOpen[ti] < 12 || w.water[ti] >= 0) continue;
         if (!legOk(c, t)) continue;
         finalTarget = [Math.floor(t[0]) + 0.5, Math.floor(t[1]) + 0.5];
         break outer;
@@ -189,9 +189,14 @@ export function findSites(w: WorldData): Sites {
     }
   }
 
-  const legs = forestLegs(1, [finalStart]);
-  const leg = legs[0] ?? { start: w.spawn, target: [w.spawn[0] + 120, w.spawn[1]] as P };
-  const obstacle: P = [leg.start[0] + (leg.target[0] - leg.start[0]) * 0.45, leg.start[1] + (leg.target[1] - leg.start[1]) * 0.45];
+  // Fallback for the final target: any forest leg away from the start.
+  const leg = finalTarget ? null : forestLegs(1, [finalStart])[0];
+
+  // ---- summit climb: the exact end of the footpath at the summit forest, to the summit pillar
+  let trailEnd: P = w.trailhead;
+  for (const t of w.trails) if (dist([t[0], t[1]], w.trailhead) < 3) trailEnd = [t[0], t[1]];
+  const top = w.landmarks.find((l) => l.name === 'Puncak Pasir Malang')!;
+  const summit = { start: trailEnd, target: [top.x, top.z] as P };
 
   // ---- intersection: smoke in the open, seen from two trail posts at a good crossing angle
   const posts: P[] = [];
@@ -221,25 +226,6 @@ export function findSites(w: WorldData): Sites {
     }
   }
   const intersection = inter ?? { a: w.spawn, b: [w.spawn[0], w.spawn[1] + 100] as P, smoke: [w.spawn[0] + 150, w.spawn[1] + 50] as P };
-
-  // ---- pace course: 40 blocks (100 m) of trail with little climb
-  let pace: Sites['pace'] | null = null;
-  for (const t of ways) {
-    const n = t.length / 2;
-    for (let k = 0; k < n && !pace; k += 4) {
-      let len = 0, j = k, lo = Infinity, hi = -Infinity, dry = true;
-      while (j < n - 1 && len < 40) {
-        len += Math.hypot(t[j * 2 + 2] - t[j * 2], t[j * 2 + 3] - t[j * 2 + 1]);
-        const i = idx(t[j * 2], t[j * 2 + 1]);
-        lo = Math.min(lo, w.height[i]); hi = Math.max(hi, w.height[i]);
-        if (w.water[i] >= 0 || w.deck[i] >= 0) dry = false;
-        j++;
-      }
-      if (len >= 40 && dry && hi - lo <= 2) pace = { start: [t[k * 2], t[k * 2 + 1]], end: [t[j * 2], t[j * 2 + 1]] };
-    }
-    if (pace) break;
-  }
-  const paceCourse = pace ?? { start: w.spawn, end: [w.spawn[0] + 40, w.spawn[1]] as P };
 
   // ---- open-navigation route over both crossroads, kept short so a lesson fits in a class session
   // (about 650 m): start 50–110 blocks before the first crossroad, at the trail point with the best
@@ -291,8 +277,7 @@ export function findSites(w: WorldData): Sites {
     resection,
     route,
     intersection,
-    pace: paceCourse,
-    forest: { start: leg.start, target: leg.target, obstacle },
-    final: { start: finalStart, target: finalTarget ?? leg.target },
+    summit,
+    final: { start: finalStart, target: finalTarget ?? leg?.target ?? [w.spawn[0] + 120, w.spawn[1]] },
   };
 }

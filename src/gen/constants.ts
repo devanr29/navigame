@@ -102,6 +102,10 @@ export interface WorldData {
   /** Footpaths (jalan setapak): the branches off the road. */
   trails: Polyline[];
   junctions: [number, number][];
+  /** 1 on the young forest on the flank of Puncak Cadas (level 5): cuttable trees, summit hidden. */
+  summitForest: Uint8Array;
+  /** End of the footpath at the summit forest's lower edge (level 5 start). */
+  trailhead: [number, number];
   landmarks: Landmark[];
   spawn: [number, number];
 }

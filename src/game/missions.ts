@@ -6,9 +6,9 @@ import { BLOCK_M, Zone, type Landmark, type WorldData } from '../gen/constants';
 import { fmtDMS, latSecAt, lonSecAt } from '../map/geo';
 import type { MapView } from '../map/mapView';
 import type { Player } from '../player/player';
-import { angleDiff, azimuthTo, backAzimuth, magneticOf, setDeclination, smokeTarget, type Sight } from '../tools/sight';
+import { angleDiff, azimuthTo, backAzimuth, gridOf, magneticOf, setDeclination, smokeTarget, type Sight } from '../tools/sight';
 import type { Notebook } from '../ui/notebook';
-import { flagPost, patok, smokeColumn, targetPost, thicket } from '../world/objects3d';
+import { flagPost, smokeColumn, targetPost } from '../world/objects3d';
 import type { PaceCounter } from './pace';
 import { DEFAULT_PACE } from './pace';
 import type { P, Sites } from './sites';
@@ -44,6 +44,8 @@ export interface Ctx {
   askNumbers(title: string, fields: { key: string; label: string; value?: number }[]): Promise<Record<string, number> | null>;
   /** Locks the compass (tape marker and team gauge). */
   lockCompass(az: number | null): void;
+  /** Puts back every tree the penerabas felled and every bush cut (a fresh forest). */
+  restoreVegetation(): void;
   /** Moves the player to another site mid-mission (not walking: the pace counter ignores the jump). */
   relocate(x: number, z: number, faceAz: number): void;
 }
@@ -91,7 +93,7 @@ export const LEVELS: LevelInfo[] = [
   { n: 2, title: 'Orientasi & Resection', focus: 'Utarakan peta, orientasi medan, mencari posisi sendiri', mechanic: 'Memutar peta, memasangkan titik ekstrem, back azimuth, menggaris', pass: 'Peta terutarakan; galat posisi di bawah 100 m' },
   { n: 3, title: 'Intersection', focus: 'Mencari letak objek', mechanic: 'Azimut dari dua titik diketahui', pass: 'Objek ditemukan dalam 150 m' },
   { n: 4, title: 'Rute navigasi terbuka', focus: 'Jalur dan persimpangan', mechanic: 'Rencana jalur, cek di setiap persimpangan', pass: 'Sampai tujuan; semua persimpangan dicek' },
-  { n: 5, title: 'Navigasi tertutup', focus: 'Hutan lebat: deklinasi, langkah, detour', mechanic: 'Kalibrasi langkah, koreksi deklinasi, kunci kompas, empat peran, detour', pass: 'Sampai sasaran setelah detour, dengan kompas terkoreksi' },
+  { n: 5, title: 'Navigasi tertutup: ke puncak', focus: 'Dari ujung jalan setapak menembus hutan ke puncak yang tidak terlihat', mechanic: 'Resection, kunci kompas, maju dengan jumlah langkah, penerabas dan sweeper', pass: 'Sampai di puncak; galat resection di bawah 100 m' },
   { n: 6, title: 'Misi akhir', focus: 'Navigasi terbuka lalu navigasi tertutup', mechanic: 'Alur lengkap dengan skor akhir', pass: 'Alur lengkap selesai' },
 ];
 
@@ -108,6 +110,8 @@ export abstract class Mission {
   orientCheck = false;
   /** Show the pace counter in the HUD. */
   showPace = false;
+  /** The player cannot walk (may still look around); the team moves them. */
+  holdPlayer = false;
   declination = 0;
   /** Time (s) a confident player needs; slower costs time points. */
   par = 300;
@@ -173,7 +177,6 @@ export abstract class Mission {
     for (const o of this.objects) this.c.scene.remove(o);
     this.objects = [];
     this.c.sight.extra = [];
-    this.c.team.hard.clear();
     setDeclination(0);
     this.c.map.declinationLabel = 'Deklinasi magnetis: 0°';
   }
@@ -703,142 +706,238 @@ class Route extends Mission {
   }
 }
 
-// ======================================================================= level 5: navtup (calibration, declination, detour); level 6: the final mission
+// ======================================================================= level 5: the summit climb (navtup)
 
-class Navtup extends Mission {
+/** The summit is reached within this many blocks (15 m) of the pillar. */
+const SUMMIT_REACH = 6;
+
+/**
+ * Level 5: from the end of a footpath up through a young forest to the summit of Puncak Pasir Malang,
+ * which cannot be seen from the path end. Resection at the path end, lock the compass on the summit,
+ * then move. The compasman cannot walk on his own: before each move he sets the number of steps, and
+ * the team walks them on the locked bearing, the penerabas felling the trees on the line with his
+ * golok and the sweeper behind him clearing them off the lane.
+ */
+class SummitClimb extends Mission {
+  private startP!: P;
+  private summit!: P;
+  private mark: P | null = null;
+  private errM: number | null = null;
+  private locked: number | null = null;
+  /** The bearing locked for the first move (scored: it is the one taken from the plotted line). */
+  private firstLock: number | null = null;
+  /** Steps set per move. */
+  private moves: number[] = [];
+  private moveFrom = 0;
+  private moveEnd: number | null = null;
+
+  start() {
+    const { sites, player } = this.c;
+    this.c.restoreVegetation();
+    this.startP = sites.summit.start;
+    this.summit = sites.summit.target;
+    player.teleport(this.startP[0], this.startP[1], azimuthTo(this.startP[0], this.startP[1], this.summit[0], this.summit[1]));
+    this.c.team.fell = true;
+    this.holdPlayer = true;
+    this.showPace = true;
+    this.orientCheck = true;
+    this.haze = 0.35;
+    this.par = 600;
+    this.destination = { p: this.summit, label: 'Puncak Pasir Malang' };
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    this.briefing = [
+      `Tim berdiri di ujung jalan setapak, di kaki Puncak Pasir Malang. Sasaran: puncaknya, di ${fmtCoord(this.summit)}. Tandai di peta sebelum berangkat.`,
+      'Di antara ujung jalan dan puncak ada hutan muda yang rapat: puncak tidak terlihat dan tidak ada jalan. Ini navigasi tertutup.',
+      '1. Resection: di ujung jalan masih terlihat beberapa titik ekstrem. Bidik dua (atau tiga), pasangkan di Catatan, gariskan back azimuth-nya, lalu tandai posisimu.',
+      '2. Kunci kompas: di peta plot garis dari posisimu ke puncak, ukur azimutnya dengan busur dan jaraknya dengan penggaris, lalu kunci kompas pada azimut itu.',
+      `3. Bergerak: sebagai compasman kamu tidak berjalan sendiri. Isi jumlah langkah, lalu tim maju di azimut terkunci. Penerabas menebas pohon di depan dengan golok, sweeper di belakangnya menyapu tebangan dari jalur. Langkahmu ${calib} per 100 m di medan datar; di hutan dan tanjakan tambahkan sekitar 20–30%.`,
+      'Ulangi Maju sampai tim keluar dari hutan di puncak.',
+    ];
+    this.objectives = [
+      { text: 'Resection di ujung jalan setapak (Tandai posisiku)', done: false },
+      { text: 'Kunci kompas ke puncak', done: false },
+      { text: 'Maju: isi jumlah langkah, tim menerabas hutan', done: false },
+      { text: 'Sampai di puncak', done: false },
+    ];
+  }
+
+  cleanup() {
+    super.cleanup();
+    this.c.team.reset();
+    this.c.player.carried = false;
+    this.c.lockCompass(null);
+    this.c.restoreVegetation();
+  }
+
+  update(dt: number) {
+    if (this.result) return;
+    this.time += dt;
+    const { team, pace } = this.c;
+    if (this.moveEnd !== null && (pace.steps >= this.moveEnd || team.blocked)) this.stopMove(team.blocked);
+    if (dist(here(this.c), this.summit) < SUMMIT_REACH) {
+      this.objectives[3].done = true;
+      this.complete();
+    }
+  }
+
+  actions(): Action[] {
+    if (this.moveEnd !== null) return [{ id: 'stop', label: 'Berhenti', run: () => this.stopMove(false) }];
+    const acts: Action[] = [];
+    if (!this.moves.length) {
+      acts.push({ id: 'mark', label: this.errM === null ? 'Tandai posisiku' : 'Tandai ulang posisiku', primary: this.errM === null, run: () => void this.resect() });
+    }
+    acts.push({ id: 'lock', label: this.locked === null ? 'Kunci kompas' : `Kompas ${deg(this.locked)}`, primary: this.errM !== null && this.locked === null, run: () => void this.lock() });
+    if (this.locked !== null) acts.push({ id: 'move', label: 'Maju … langkah', primary: true, run: () => void this.move() });
+    return acts;
+  }
+
+  private async resect() {
+    const m = await this.markMyPosition();
+    if (!m || this.result) return;
+    this.mark = m.p;
+    this.errM = M(m.err);
+    this.objectives[0].done = true;
+    this.c.toast('Posisi ditandai', ['Plot garis dari posisimu ke puncak, ukur azimut dan jaraknya, lalu kunci kompas.']);
+  }
+
+  private async lock() {
+    if (this.errM === null) {
+      this.c.toast('Resection dulu', ['Garis ke puncak harus berangkat dari posisi yang sudah pasti. Tentukan posisimu dengan resection.']);
+      return;
+    }
+    const v = await this.c.askNumbers('Kunci kompas ke puncak', [{ key: 'az', label: 'Azimut kompas (°)', value: this.locked ?? undefined }]);
+    if (!v || !Number.isFinite(v.az) || this.result) return;
+    this.locked = ((v.az % 360) + 360) % 360;
+    if (!this.moves.length) this.firstLock = this.locked;
+    this.c.lockCompass(this.locked);
+    if (this.c.team.cutting) this.c.team.heading = gridOf(this.locked);
+    this.objectives[1].done = true;
+    this.c.notebook.notes.push(`Kompas dikunci ${deg(this.locked)}.`);
+  }
+
+  private async move() {
+    if (this.locked === null) return;
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    const v = await this.c.askNumbers('Maju', [{ key: 'steps', label: `Jumlah langkah (${calib} langkah = 100 m datar)` }]);
+    if (!v || !Number.isFinite(v.steps) || v.steps < 1 || this.result) return;
+    const n = Math.min(2000, Math.round(v.steps));
+    const { team, player, pace } = this.c;
+    if (!team.cutting) {
+      // first move: penerabas in front on the bearing, sweeper and stringlineman behind the compasman
+      team.place(player, gridOf(this.locked));
+      pace.reset();
+    }
+    this.moveFrom = pace.steps;
+    this.moveEnd = pace.steps + n;
+    this.moves.push(n);
+    team.auto = true;
+    this.objectives[2].done = true;
+    this.c.notebook.notes.push(`Maju ${n} langkah pada ${deg(this.locked)}.`);
+  }
+
+  private stopMove(blocked: boolean) {
+    const { team, pace } = this.c;
+    team.auto = false;
+    this.moveEnd = null;
+    const walked = Math.round(pace.steps - this.moveFrom);
+    this.c.toast(blocked ? `Terhalang setelah ${walked} langkah` : `Berhenti setelah ${walked} langkah`, [
+      `Total ${Math.round(pace.steps)} langkah dari ujung jalan.`,
+      blocked
+        ? 'Tebing terlalu curam untuk didaki. Kunci kompas sedikit ke samping untuk memutarinya, lalu kembali ke azimut semula.'
+        : 'Puncak belum tercapai? Bandingkan langkahmu dengan jarak di peta, lalu maju lagi.',
+    ]);
+  }
+
+  private complete() {
+    const { team, pace, map } = this.c;
+    team.stopCutting();
+    this.c.player.carried = false;
+    const s = this.startP, t = this.summit;
+    const trueAz = magneticOf(azimuthTo(s[0], s[1], t[0], t[1]));
+    const legM = M(dist(s, t));
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    const flat = Math.round((legM * calib) / 100);
+    const steps = Math.round(pace.steps);
+    const lockErr = this.firstLock === null ? null : Math.abs(angleDiff(this.firstLock, trueAz));
+    const stats: [string, string][] = [
+      ['Galat resection', this.errM === null ? '—' : `${this.errM} m (batas 100 m)`],
+      ['Azimut ujung jalan → puncak', deg(trueAz)],
+      ['Kompas dikunci (gerakan pertama)', this.firstLock === null ? '—' : `${deg(this.firstLock)} (selisih ${lockErr!.toFixed(1)}°)`],
+      ['Jarak ke puncak', `${legM} m (${flat} langkah datar)`],
+      ['Langkah sampai puncak', `${steps} dalam ${this.moves.length} gerakan (${this.moves.join(' + ') || '—'})`],
+      ['Pohon ditebang', String(team.felledCount)],
+    ];
+    if (this.errM === null) {
+      this.lessons.push('Resection di ujung jalan tidak dilakukan. Tanpa posisi yang pasti, garis ke puncak tidak punya titik awal.');
+    } else if (this.errM > 100) {
+      this.lessons.push(`Resection meleset ${this.errM} m, sehingga garis ke puncak berangkat dari titik yang salah. Di hutan kesalahan ini tidak bisa dicek lagi.`);
+    }
+    this.crossingTip();
+    if (this.pairs().wrong) this.lessons.push('Ada bidikan yang dipasangkan dengan simbol yang salah, sehingga garisnya berangkat dari tempat yang salah.');
+    if (lockErr !== null) {
+      this.lessons.push(lockErr > 3
+        ? `Azimut yang dikunci berbeda ${Math.round(lockErr)}° dari garis ujung jalan → puncak. Pada ${legM} m selisih itu menggeser sekitar ${Math.round(legM * Math.sin((lockErr * Math.PI) / 180))} m; di hutan tidak ada titik ekstrem untuk mengoreksinya.`
+        : 'Azimut yang dikunci tepat: garis dari posisi hasil resection ke puncak.');
+    }
+    if (steps > flat * 1.05) this.lessons.push(`Butuh ${steps} langkah untuk ${legM} m, lebih banyak dari ${flat} langkah di medan datar: tanjakan dan hutan memperpendek langkah.`);
+    this.lessons.push('Navigasi tertutup: puncak tidak terlihat dari ujung jalan. Hanya azimut terkunci dan hitungan langkah yang membawa tim ke sana; penerabas membuka jalur, sweeper membersihkannya.');
+    const passed = this.errM !== null && this.errM <= 100 && this.firstLock !== null;
+    this.revealTruth(s, this.mark, `Ujung jalan (galat ${this.errM ?? '—'} m)`);
+    map.reveals.push({ x: t[0], z: t[1], label: 'Puncak', color: '#1d8a3a', from: s });
+    map.redraw();
+    const resPts = this.errM === null ? 0 : 40 * clamp01(1 - this.errM / 150);
+    const lockPts = lockErr === null ? 0 : 40 * clamp01(1 - (lockErr - 1) / 6);
+    this.finish(passed, resPts + lockPts + this.timeScore(20), stats);
+  }
+
+  devInfo(): [string, string][] {
+    const { team, pace } = this.c;
+    const s = this.startP, t = this.summit;
+    const legM = M(dist(s, t));
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    return [
+      ['Galat resection', this.errM === null ? '—' : `${this.errM} m (lulus ≤100 m)`],
+      ['Azimut ke puncak / dikunci', `${deg(magneticOf(azimuthTo(s[0], s[1], t[0], t[1])))} / ${this.locked === null ? '—' : deg(this.locked)} (pertama ${this.firstLock === null ? '—' : deg(this.firstLock)})`],
+      ['Jarak', `${legM} m · langkah datar ${Math.round((legM * calib) / 100)}`],
+      ['Langkah', `${Math.round(pace.steps)}${this.moveEnd === null ? '' : ` → ${Math.round(this.moveEnd)}`} · gerakan ${this.moves.join(' + ') || '—'}`],
+      ['Jarak ke puncak', `${M(dist(here(this.c), t))} m (sampai <${M(SUMMIT_REACH)} m)`],
+      ['Tim', team.cutting ? `${team.auto ? (team.chopping ? 'menebas' : 'maju') : 'berhenti'}${team.blocked ? ' · TERHALANG' : ''} · ${team.felledCount} pohon` : 'belum diatur'],
+    ];
+  }
+
+  devPoints() { return [{ label: 'Ujung jalan', p: this.c.sites.summit.start }, { label: 'Puncak', p: this.c.sites.summit.target }]; }
+
+  devSolution() {
+    const s = this.c.sites.summit.start, t = this.c.sites.summit.target;
+    const az = magneticOf(azimuthTo(s[0], s[1], t[0], t[1]));
+    const legM = M(dist(s, t));
+    const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
+    const flat = Math.round((legM * calib) / 100);
+    return [
+      'Utarakan peta (selisih ≤5°).',
+      ...this.resectionKey(s),
+      `Tekan Tandai posisiku dan ketuk ${fmtCoord(s)}. Lulus bila galat ≤100 m.`,
+      `Di peta letakkan busur di posisimu dan arahkan ke puncak: azimut ${deg(az)}, jarak ${legM} m.`,
+      `Tekan Kunci kompas: ${Math.round(az)}.`,
+      `Tekan Maju: sekitar ${Math.round(flat * 1.25)} langkah (${flat} langkah datar × 1,25 untuk hutan dan tanjakan). Bila belum sampai, Maju lagi; puncak tercapai dalam ${M(SUMMIT_REACH)} m.`,
+    ];
+  }
+}
+
+// ======================================================================= level 6: the final mission
+
+/** Navtup leg on a locked bearing with the team under the joystick (the final mission). */
+abstract class Navtup extends Mission {
   protected startP!: P;
   protected target!: P;
   protected locked: number | null = null;
   protected targetSteps: number | null = null;
   protected legEndErr: number | null = null;
   protected stepsAtEnd = 0;
-  protected obstacleHit = false;
-  protected detourDone = false;
-  protected withObstacle = false;
-  protected obstacle: P | null = null;
-  protected legStartSet = false;
   protected found = false;
   protected teamPlaced = false;
-  /**
-   * Level 5 opens with the pace calibration (100 m between a green and a red flag), then moves the
-   * player to the forest edge. 'off' = no calibration (the final mission, or already moved on).
-   */
-  protected calib: 'off' | 'wait' | 'walk' = 'off';
-  protected calibFlags: [P, P] | null = null;
-  protected calibCount: number | null = null;
-
-  start() {
-    const { sites, player } = this.c;
-    this.declination = 6;
-    setDeclination(this.declination);
-    this.c.map.declinationLabel = 'Deklinasi magnetis: 6° T (diperbesar untuk latihan)';
-    this.setup(sites.forest.start, sites.forest.target, true);
-    // Calibration course: 40 blocks (100 m) along the flat trail stretch.
-    const s = sites.pace.start, e = sites.pace.end;
-    const L = dist(s, e) || 1;
-    const end: P = [s[0] + ((e[0] - s[0]) / L) * 40, s[1] + ((e[1] - s[1]) / L) * 40];
-    this.calibFlags = [s, end];
-    this.place(flagPost(0x2fa84f, 2.2), s);
-    this.place(flagPost(0xd2322d, 2.2), end);
-    this.calib = 'wait';
-    player.teleport(s[0], s[1], azimuthTo(s[0], s[1], end[0], end[1]));
-    this.objectives.unshift({ text: 'Kalibrasi: jalan dari bendera hijau ke bendera merah (100 m)', done: false });
-    this.par = 900;
-    this.briefing = [
-      'Di hutan lebat tidak ada titik ekstrem, jadi jarak dihitung dengan langkah. Kalibrasi dulu: berjalan normal dari bendera hijau ke bendera merah yang berjarak 100 m. Langkahmu dicatat sebagai "langkah per 100 m". Setelah itu kamu diantar ke tepi hutan.',
-      `Titik akhir navigasi terbuka ada di tepi hutan (${fmtCoord(this.startP)}): posisi itu sudah dipastikan dengan resection terakhir. Sasaran: pos berbendera oranye di dalam hutan, di ${fmtCoord(this.target)}. Tandai di peta sebelum berangkat.`,
-      'Kompas menunjuk utara magnetis, peta memakai utara grid. Di legenda peta tertulis deklinasi 6° T: azimut kompas = azimut peta − deklinasi timur. Di Indonesia deklinasi sebenarnya kecil (sekitar 1° atau kurang); di sini diperbesar supaya efeknya terlihat.',
-      'Analisis kontur di sepanjang garis, plot garis lurus ke sasaran, ukur azimut (busur) dan panjangnya (penggaris), lalu ubah jarak menjadi target langkah dengan kalibrasimu. Di hutan dan tanjakan langkah lebih pendek: tambahkan sekitar 20–30%.',
-      'Kunci kompas pada azimut yang sudah dikoreksi, atur posisi tim, lalu menerabas. Sebagai compasman, beri aba-aba kiri/kanan agar penerabas tetap di azimut.',
-      'Di tengah jalan ada semak berduri yang tidak bisa ditebas. Lakukan detour: belok 90°, hitung langkah, belok kembali ke azimut melewati rintangan, belok 90° lagi dan kembali dengan jumlah langkah yang sama, lalu lanjutkan azimut.',
-    ];
-  }
-
-  /** Calibration walk: the pace counter restarts on the green flag and is read on the red one. */
-  private updateCalib() {
-    const { player, pace } = this.c;
-    const [s, e] = this.calibFlags!;
-    const h: P = [player.x, player.z];
-    if (this.calib === 'wait') {
-      if (dist(h, s) < 1.5) pace.reset();
-      else if (dist(h, s) < 4) this.calib = 'walk';
-      return;
-    }
-    if (dist(h, s) < 1.5) { this.calib = 'wait'; pace.reset(); }
-    if (dist(h, e) < 1.5) {
-      const count = Math.round((pace.steps * 100) / (dist(s, e) * BLOCK_M));
-      this.calibCount = count;
-      this.c.progress.paceCount = count;
-      this.c.saveProgress();
-      this.c.notebook.notes.push(`Kalibrasi: ${count} langkah per 100 m.`);
-      this.toForest([`Kalibrasi: ${count} langkah per 100 m.`]);
-    }
-  }
-
-  /** Ends the calibration and moves the player to the forest edge. */
-  private toForest(lines: string[]) {
-    const s = this.startP, t = this.target;
-    this.calib = 'off';
-    this.objectives[0].done = true;
-    this.c.relocate(s[0], s[1], azimuthTo(s[0], s[1], t[0], t[1]) + 35);
-    this.c.pace.reset();
-    this.c.toast('Tim diantar ke tepi hutan', [...lines, 'Plot garis ke sasaran, koreksi deklinasi, lalu kunci kompas.']);
-  }
-
-  protected setup(start: P, target: P, obstacle: boolean) {
-    const { player } = this.c;
-    this.startP = start;
-    this.target = target;
-    this.withObstacle = obstacle;
-    player.teleport(start[0], start[1], azimuthTo(start[0], start[1], target[0], target[1]) + 35);
-    this.place(patok(), start);
-    this.place(targetPost(), target);
-    this.c.map.symbols = [{ x: start[0], z: start[1], label: 'Titik akhir navigasi terbuka', id: 221 }];
-    this.destination = { p: target, label: 'Pos sasaran' };
-    this.showPace = true;
-    this.par = 720;
-    if (obstacle) this.buildObstacle();
-    this.objectives = [
-      { text: 'Plot garis dari titik akhir navigasi terbuka ke sasaran (busur → Gariskan)', done: false, optional: true },
-      { text: this.declination ? `Kunci kompas (koreksi deklinasi ${this.declination}° T) dan isi target langkah` : 'Kunci kompas dan isi target langkah', done: false },
-      { text: 'Atur posisi tim', done: false },
-      ...(obstacle ? [{ text: 'Detour melewati semak berduri', done: false }] : []),
-      { text: 'Menerabas dan temukan pos sasaran', done: false },
-    ];
-  }
-
-  private buildObstacle() {
-    const { w } = this.c;
-    const N = w.size;
-    const s = this.startP, t = this.target;
-    const L = dist(s, t);
-    const ux = (t[0] - s[0]) / L, uz = (t[1] - s[1]) / L;
-    const o: P = [s[0] + ux * L * 0.45, s[1] + uz * L * 0.45];
-    this.obstacle = o;
-    const cells: [number, number, number][] = [];
-    const seen = new Set<number>();
-    for (let p = -9; p <= 9; p += 0.5) {
-      for (let a = -1.5; a <= 1.5; a += 0.5) {
-        const x = Math.floor(o[0] - uz * p + ux * a), z = Math.floor(o[1] + ux * p + uz * a);
-        const i = z * N + x;
-        if (seen.has(i)) continue;
-        seen.add(i);
-        this.c.team.hard.add(i);
-        w.solid[i] = 1;
-        cells.push([x, w.height[i], z]);
-      }
-    }
-    const mesh = thicket(cells);
-    this.c.scene.add(mesh);
-    this.objects.push(mesh);
-    this.obstacleCells = [...seen];
-  }
-
-  private obstacleCells: number[] = [];
 
   cleanup() {
-    for (const i of this.obstacleCells) this.c.w.solid[i] = 0;
-    this.obstacleCells = [];
     super.cleanup();
     this.c.team.reset();
     this.c.player.carried = false;
@@ -852,24 +951,7 @@ class Navtup extends Mission {
   update(dt: number) {
     if (this.result) return;
     this.time += dt;
-    if (this.calib !== 'off') { this.updateCalib(); return; }
-    const { player, team } = this.c;
-    const i0 = this.idx('Plot');
-    if (i0 >= 0) this.objectives[i0].done ||= this.linesFrom(this.startP).length > 0;
-    // obstacle and detour
-    if (this.withObstacle && this.obstacle) {
-      if (team.blocked) this.obstacleHit = true;
-      const L = dist(this.startP, this.target);
-      const ux = (this.target[0] - this.startP[0]) / L, uz = (this.target[1] - this.startP[1]) / L;
-      const along = (player.x - this.startP[0]) * ux + (player.z - this.startP[1]) * uz;
-      const obsAlong = L * 0.45;
-      if (this.obstacleHit && along > obsAlong + 3 && !this.detourDone) {
-        this.detourDone = true;
-        const k = this.idx('Detour');
-        if (k >= 0) this.objectives[k].done = true;
-        this.c.toast('Rintangan terlewati', ['Kembali ke garis azimut dengan jumlah langkah yang sama, lalu lanjutkan.']);
-      }
-    }
+    const { player } = this.c;
     if (dist([player.x, player.z], this.target) < 3 && !this.found) {
       this.found = true;
       if (this.legEndErr === null) this.recordLegEnd();
@@ -879,14 +961,8 @@ class Navtup extends Mission {
   }
 
   actions(): Action[] {
-    const { team, progress } = this.c;
+    const { team } = this.c;
     const acts: Action[] = [];
-    if (this.calib !== 'off') {
-      // A saved calibration (a retry, or done before) may be reused instead of walking it again.
-      const saved = progress.paceCount;
-      if (saved !== null) acts.push({ id: 'calib-skip', label: `Pakai kalibrasi tersimpan (${saved})`, run: () => this.toForest([`Kalibrasi tersimpan: ${saved} langkah per 100 m.`]) });
-      return acts;
-    }
     if (!team.cutting) {
       acts.push({ id: 'lock', label: this.locked === null ? 'Kunci kompas' : `Kompas ${Math.round(this.locked)}°`, run: () => void this.lock() });
       if (this.locked !== null && this.legEndErr === null) acts.push({ id: 'team', label: 'Atur posisi tim', primary: true, run: () => this.placeTeam() });
@@ -922,8 +998,7 @@ class Navtup extends Mission {
     const { team, player, pace } = this.c;
     if (this.locked === null) return;
     // Team faces the locked bearing (converted to grid for movement).
-    const grid = (this.locked + this.declination + 360) % 360;
-    team.place(player, grid);
+    team.place(player, gridOf(this.locked));
     this.teamPlaced = true;
     pace.reset();
     const k = this.idx('Atur');
@@ -955,8 +1030,7 @@ class Navtup extends Mission {
     team.stopCutting();
     this.c.player.carried = false;
     const e = this.legEndErr ?? 0;
-    const gridAz = azimuthTo(this.startP[0], this.startP[1], this.target[0], this.target[1]);
-    const magAz = magneticOf(gridAz);
+    const magAz = magneticOf(azimuthTo(this.startP[0], this.startP[1], this.target[0], this.target[1]));
     const legM = M(dist(this.startP, this.target));
     const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
     const idealSteps = Math.round((legM * calib) / 100);
@@ -967,18 +1041,10 @@ class Navtup extends Mission {
       ['Panjang leg', `${legM} m`],
       ['Langkah saat akhir leg', `${this.stepsAtEnd} (target ${this.targetSteps ?? '—'}, hitungan datar ${idealSteps})`],
     ];
-    const uncorrected = this.declination !== 0 && this.locked !== null
-      && Math.abs(angleDiff(this.locked, gridAz)) < 2 && Math.abs(angleDiff(this.locked, magAz)) > 3;
-    if (uncorrected) {
-      this.lessons.push(`Kompas dikunci pada azimut peta (${Math.round(gridAz)}°) tanpa koreksi deklinasi. Azimut kompas yang benar: ${Math.round(gridAz)}° − ${this.declination}° = ${Math.round(magAz)}°. Pada leg ${legM} m, selisih ${this.declination}° menggeser sekitar ${Math.round(legM * Math.tan((this.declination * Math.PI) / 180))} m.`);
-    } else if (this.locked !== null && Math.abs(angleDiff(this.locked, magAz)) > 3) {
-      this.lessons.push(`Azimut yang dikunci berbeda ${Math.round(Math.abs(angleDiff(this.locked, magAz)))}° dari garis plot. Ukur ulang dengan busur dari titik akhir navigasi terbuka ke sasaran.`);
-    }
-    else if (this.declination !== 0 && this.locked !== null) {
-      this.lessons.push('Koreksi deklinasi benar: azimut kompas = azimut peta − deklinasi timur.');
+    if (this.locked !== null && Math.abs(angleDiff(this.locked, magAz)) > 3) {
+      this.lessons.push(`Azimut yang dikunci berbeda ${Math.round(Math.abs(angleDiff(this.locked, magAz)))}° dari garis plot. Ukur ulang dengan busur dari titik resection terakhir ke sasaran.`);
     }
     if (this.stepsAtEnd > idealSteps * 1.05) this.lessons.push('Hitungan langkah lebih banyak dari hitungan di medan datar: tanjakan dan semak memperpendek langkah.');
-    if (this.withObstacle) this.lessons.push(this.detourDone ? 'Detour berhasil: langkah sepanjang azimut tetap dihitung, langkah ke samping dibayar kembali.' : 'Rintangan tidak dilewati dengan detour.');
     this.lessons.push('Navigasi tertutup: tanpa titik ekstrem, tim hanya mengandalkan azimut terkunci dan hitungan langkah.');
     const lockPts = this.locked === null ? 0 : 20 * clamp01(1 - (Math.abs(angleDiff(this.locked, magAz)) - 1) / 6);
     const pacePts = this.targetSteps ? 15 * clamp01(1 - Math.abs(this.stepsAtEnd - this.targetSteps) / (this.targetSteps * 0.3)) : 0;
@@ -986,13 +1052,9 @@ class Navtup extends Mission {
     if (this.locked === null) missed.push('kompas tidak dikunci');
     if (!this.teamPlaced) missed.push('tim tidak diatur');
     if (missed.length) this.lessons.unshift(`Pos sasaran ditemukan tanpa alur navigasi tertutup (${missed.join(', ')}). Di hutan lebat sasaran hanya bisa dicapai dengan azimut terkunci dan tim yang menerabas.`);
-    const passed = missed.length === 0 && (!this.withObstacle || this.detourDone);
-    this.revealLeg();
-    this.finish(passed, 50 * clamp01(1 - (e - 10) / 70) + lockPts + pacePts + this.timeScore(15), stats);
-  }
-
-  protected revealLeg() {
+    const passed = missed.length === 0;
     this.c.map.reveals.push({ x: this.target[0], z: this.target[1], label: 'Pos sasaran', color: '#1d8a3a', from: this.startP });
+    this.finish(passed, 50 * clamp01(1 - (e - 10) / 70) + lockPts + pacePts + this.timeScore(15), stats);
   }
 
   devInfo(): [string, string][] {
@@ -1004,8 +1066,8 @@ class Navtup extends Mission {
     const teamState = team.cutting
       ? `menerabas · arah ${deg(magneticOf(team.heading))} · simpang ${dev === null ? '—' : `${dev.toFixed(1)}°`}${team.blocked ? ' · TERHALANG' : ''}`
       : team.active ? 'mengikuti' : 'belum diatur';
-    const out: [string, string][] = [
-      ['Azimut peta / kompas benar', `${deg(gridAz)} / ${deg(magneticOf(gridAz))}`],
+    return [
+      ['Azimut kompas benar', deg(magneticOf(gridAz))],
       ['Kompas dikunci', this.locked === null ? '—' : deg(this.locked)],
       ['Panjang leg', `${legM} m · langkah datar ${Math.round((legM * calib) / 100)} · target ${this.targetSteps ?? '—'}`],
       ['Langkah sekarang', String(Math.round(pace.steps))],
@@ -1013,51 +1075,19 @@ class Navtup extends Mission {
       ['Tim', teamState],
       ['Galat akhir leg', this.legEndErr === null ? '—' : `${this.legEndErr} m (${this.stepsAtEnd} langkah)`],
     ];
-    if (this.calibFlags) {
-      const [cs, ce] = this.calibFlags, h = here(this.c);
-      const m = (a: P, b: P) => `${(dist(a, b) * BLOCK_M).toFixed(1)} m`;
-      out.unshift(['Kalibrasi', this.calib === 'off'
-        ? `${this.calibCount ?? this.c.progress.paceCount ?? '—'} langkah / 100 m`
-        : `fase ${this.calib} · ${Math.round(pace.steps)} langkah · ke hijau ${m(h, cs)} / merah ${m(h, ce)} (mulai >3,75 m, sampai <3,75 m)`]);
-    }
-    if (this.withObstacle && this.obstacle) {
-      const L = dist(this.startP, this.target);
-      const ux = (this.target[0] - this.startP[0]) / L, uz = (this.target[1] - this.startP[1]) / L;
-      const along = (this.c.player.x - this.startP[0]) * ux + (this.c.player.z - this.startP[1]) * uz;
-      out.push(['Rintangan', `tertabrak ${this.obstacleHit ? 'ya' : 'tidak'} · detour ${this.detourDone ? 'selesai' : 'belum'} · sepanjang garis ${M(along)} m / perlu >${M(L * 0.45 + 3)} m`]);
-    }
-    return out;
-  }
-
-  devPoints() {
-    const pts = [{ label: 'Titik awal leg', p: this.startP }, { label: 'Pos sasaran', p: this.target }];
-    if (this.obstacle) pts.splice(1, 0, { label: 'Rintangan', p: this.obstacle });
-    if (this.calibFlags) pts.unshift({ label: 'Bendera hijau', p: this.calibFlags[0] }, { label: 'Bendera merah', p: this.calibFlags[1] });
-    return pts;
-  }
-
-  devSolution() {
-    if (!this.calibFlags) return this.legSolution();
-    const [cs, ce] = this.calibFlags;
-    return [
-      `Berjalan biasa (jangan lari) dari bendera hijau ke bendera merah (azimut ${deg(magneticOf(azimuthTo(cs[0], cs[1], ce[0], ce[1])))}, 100 m). Kalibrasi tercatat saat sampai, lalu kamu dipindah ke tepi hutan. Bila sudah pernah kalibrasi: Pakai kalibrasi tersimpan.`,
-      ...this.legSolution(),
-    ];
   }
 
   /** Solution steps for the navtup leg from startP to the target. */
   protected legSolution(): string[] {
     const s = this.startP, t = this.target;
-    const gridAz = azimuthTo(s[0], s[1], t[0], t[1]), mag = magneticOf(gridAz);
+    const mag = magneticOf(azimuthTo(s[0], s[1], t[0], t[1]));
     const legM = M(dist(s, t));
     const calib = this.c.progress.paceCount ?? DEFAULT_PACE;
     const flat = Math.round((legM * calib) / 100);
     return [
-      `Di peta letakkan busur di ${fmtCoord(s)} dan arahkan ke pos sasaran: azimut ${deg(gridAz)}, panjang ${legM} m (opsional: Gariskan).`,
-      ...(this.declination ? [`Koreksi deklinasi: ${deg(gridAz)} − ${this.declination}° = ${deg(mag)}.`] : []),
+      `Di peta letakkan busur di ${fmtCoord(s)} dan arahkan ke pos sasaran: azimut ${deg(mag)}, panjang ${legM} m (opsional: Gariskan).`,
       `Tekan Kunci kompas: azimut ${Math.round(mag)}, target langkah sekitar ${Math.round(flat * 1.25)} (${flat} langkah datar × 1,25 untuk hutan dan tanjakan).`,
       'Tekan Atur posisi tim, lalu maju (joystick/W). Tahan Kiri/Kanan agar simpangan di penunjuk tetap dekat 0°.',
-      ...(this.withObstacle && this.obstacle ? [`Semak berduri ada sekitar ${M(dist(s, this.obstacle))} m dari awal. Saat terhalang: ↶ 90°, maju ±25 m, 90° ↷, maju melewati semak (>${M(dist(s, t) * 0.45 + 3)} m sepanjang garis), 90° ↷, kembali ±25 m, ↶ 90° dan lanjutkan azimut.`] : []),
       'Saat hitungan langkah mendekati target, tekan Selesai leg dan cari pos (ditemukan <7,5 m).',
     ];
   }
@@ -1204,7 +1234,7 @@ export function createMission(level: number, c: Ctx): Mission | null {
     case 2: return new Resection(c, level);
     case 3: return new Intersection(c, level);
     case 4: return new Route(c, level);
-    case 5: return new Navtup(c, level);
+    case 5: return new SummitClimb(c, level);
     case 6: return new FinalMission(c, level);
     default: return null;
   }

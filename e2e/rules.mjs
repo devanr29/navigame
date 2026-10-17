@@ -2,7 +2,7 @@
 // required step must not pass, and a line erased after drawing does not un-tick its objective.
 // Needs the dev server on :5173 (npm run dev).
 import { chromium } from 'playwright-core';
-const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await (await browser.newContext({ viewport: { width: 844, height: 390 } })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -56,35 +56,29 @@ let r = await debrief();
 check('L4 without starting resection fails', /Belum lulus/.test(r.title), r.title);
 check('L4 explains the missing resection', /Resection di titik awal tidak dilakukan/.test(r.text));
 
-// Level 5 opens with the pace calibration: reuse a saved count to go straight to the forest edge.
-const skipCalib = () => g(() => {
-  const gm = window.__game;
-  gm.progress.paceCount = 133;
-  gm.mission.actions().find((a) => a.id === 'calib-skip').run();
-});
-
-// ---- level 5: walking straight to the post (no lock, no team) → not passed
+// ---- level 5: at the summit without resection or a locked compass → not passed
+const summitNear = () => g(() => { const t = window.__game.sites.summit.target; return [t[0] + 2, t[1] + 2]; });
 await enter(5);
-await skipCalib();
-await teleport(await g(() => window.__game.mission.target));
+await teleport(await summitNear());
 r = await debrief();
-check('L5 without lock/team fails', /Belum lulus/.test(r.title), r.title);
-check('L5 explains the skipped flow', /tanpa alur navigasi tertutup/.test(r.text));
+check('L5 without resection/lock fails', /Belum lulus/.test(r.title), r.title);
+check('L5 explains the missing resection', /Resection di ujung jalan tidak dilakukan/.test(r.text));
 
-// ---- level 5: lock + team placed and the detour made, then reaching the post → passed
+// ---- level 5: resection at the path end and the compass locked on the summit, then the summit → passed
 await enter(5);
-await skipCalib();
-await g(async () => {
+await g(() => {
   const m = window.__game.mission;
-  m.detourDone = true;
-  m.locked = 90;
-  m.c.lockCompass(90);
-  m.placeTeam();
-  m.endLeg(); // while cutting, the team carries the player; stop to walk (and teleport) freely
+  const s = window.__game.sites.summit.start, t = window.__game.sites.summit.target;
+  m.errM = 12;
+  m.mark = s;
+  m.objectives[0].done = true;
+  const az = ((Math.atan2(t[0] - s[0], -(t[1] - s[1])) * 180) / Math.PI + 360) % 360;
+  m.locked = m.firstLock = az;
+  m.c.lockCompass(az);
 });
-await teleport(await g(() => window.__game.mission.target));
+await teleport(await summitNear());
 r = await debrief();
-check('L5 with lock and team passes', /Berhasil/.test(r.title), r.title);
+check('L5 with resection and lock passes', /Berhasil/.test(r.title), r.title);
 
 // ---- level 6: straight to the post → not passed, lessons name the skipped steps
 await enter(6);

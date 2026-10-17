@@ -139,6 +139,8 @@ export interface Character {
   group: THREE.Group;
   /** Advances the walk animation; `speed` in blocks per second. */
   animate(dt: number, speed: number): void;
+  /** Work instead of walking: the penerabas chops with the golok, the sweeper rakes side to side. */
+  work(dt: number): void;
 }
 
 /**
@@ -240,6 +242,21 @@ export function makeCharacter(role: Role): Character {
       legR.rotation.x = -swing;
       armL.rotation.x = -swing * 0.8;
       if (role !== 'compasman' && role !== 'stringlineman') armR.rotation.x = swing * 0.8;
+      armR.rotation.z = 0;
+    },
+    work(dt) {
+      phase += dt * 7;
+      legL.rotation.x = legR.rotation.x = 0;
+      if (role === 'penerabas') {
+        // raise the golok over the shoulder, then strike down and across
+        const c = (phase % (Math.PI * 2)) / (Math.PI * 2);
+        armR.rotation.x = c < 0.6 ? 0.4 + (c / 0.6) * 2.4 : 2.8 - ((c - 0.6) / 0.4) * 2.6;
+        armR.rotation.z = 0.25;
+        armL.rotation.x = 0.3;
+      } else {
+        armR.rotation.x = armL.rotation.x = 0.9;
+        armR.rotation.z = 0.45 * Math.sin(phase);
+      }
     },
   };
 }

@@ -1,5 +1,6 @@
 // Mission objects placed in the world for one mission: posts with known coordinates, target markers,
-// a rising smoke column, a thicket obstacle, and the stringline the team leaves behind.
+// a rising smoke column, the stringline the team leaves behind, and the trees it
+// fells and the lane it clears.
 import * as THREE from 'three';
 import { GeoBuilder } from './mesh';
 
@@ -56,17 +57,6 @@ export function smokeColumn(): { group: THREE.Group; update(t: number): void } {
   };
 }
 
-/** Dense thorny thicket (semak berduri) band: an obstacle that forces a detour. */
-export function thicket(cells: [number, number, number][]): THREE.Mesh {
-  const g = new GeoBuilder();
-  for (const [x, y, z] of cells) {
-    const h = 1.4 + ((x * 7 + z * 13) % 5) * 0.12;
-    g.box(x, y, z, x + 1, y + h, z + 1, rgb(((x + z) & 1) ? 0x2f4a22 : 0x3a5a28));
-    g.box(x + 0.2, y + h, z + 0.2, x + 0.8, y + h + 0.3, z + 0.8, rgb(0x5a3a2a));
-  }
-  return new THREE.Mesh(g.build(), mat);
-}
-
 /** Stringline: thin red/white posts joined by a line, growing as the team advances. */
 export class Stringline {
   readonly group = new THREE.Group();
@@ -110,5 +100,36 @@ export class Stringline {
 
   last(): THREE.Vector3 | null {
     return this.pts.length ? this.pts[this.pts.length - 1] : null;
+  }
+}
+
+/** A young tree felled by the penerabas: trunk and canopy, origin at the foot of the trunk. */
+export function youngTree(trunk: number): THREE.Mesh {
+  const g = new GeoBuilder();
+  g.box(-0.2, 0, -0.2, 0.2, trunk + 0.2, 0.2, rgb(0x6b4a2b));
+  g.box(-1.5, trunk, -1.5, 1.5, trunk + 2, 1.5, rgb(0x34622e));
+  return new THREE.Mesh(g.build(), mat);
+}
+
+/** The lane the team cuts: a strip of bare, swept earth growing behind the sweeper, back to the path. */
+export class Lane {
+  readonly mesh: THREE.InstancedMesh;
+  private count = 0;
+
+  constructor() {
+    const g = new GeoBuilder();
+    g.box(-0.7, 0, -0.35, 0.7, 0.06, 0.35, rgb(0x8a643c));
+    this.mesh = new THREE.InstancedMesh(g.build(), mat, 3000);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+  }
+
+  /** Adds a piece of lane at ground point (x, y, z), across the heading (grid degrees). */
+  add(x: number, y: number, z: number, heading: number) {
+    if (this.count >= 3000) return;
+    const m = new THREE.Matrix4().makeRotationY((-heading * Math.PI) / 180).setPosition(x, y, z);
+    this.mesh.setMatrixAt(this.count++, m);
+    this.mesh.count = this.count;
+    this.mesh.instanceMatrix.needsUpdate = true;
   }
 }

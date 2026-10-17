@@ -209,8 +209,60 @@ const levels = {
   },
 
   async 5(page) {
-    const calib = await calibrate(page);
-    return { calib, ...(await navtup(page, true)) };
+    // 1. resection at the path end: sight two landmarks, pair, back azimuth, mark the crossing
+    const vis = await page.evaluate(() => T.visibleLandmarks());
+    for (const id of vis.slice(0, 2)) {
+      await page.evaluate(async (id) => {
+        const r = await T.sightTarget(id);
+        r.pairedWith = r.target;
+        r.backTyped = T.backAz(r.azimuth);
+      }, id);
+    }
+    await clickAction(page, 'Tandai posisiku');
+    const p = await page.evaluate(() => T.pos());
+    await tapSheet(page, p[0], p[1]);
+    await page.getByRole('button', { name: 'Kirim' }).click();
+    await page.waitForTimeout(400);
+    // 2. lock the compass on the summit (declination 0: map azimuth = compass azimuth)
+    const plan = await page.evaluate(() => {
+      const s = T.pos(), t = T.g.sites.summit.target;
+      return { az: Math.round(T.az(s[0], s[1], t[0], t[1])), steps: Math.round((Math.hypot(t[0] - s[0], t[1] - s[1]) * 2.5 * 133) / 100) };
+    });
+    await clickAction(page, 'Kunci kompas');
+    await page.locator('.dialog-box label:nth-of-type(1) input').fill(String(plan.az));
+    await page.getByRole('button', { name: 'Simpan' }).click();
+    await page.waitForTimeout(200);
+    // 3. move: the flat count first, then short moves until the team is out on the summit. Headless
+    // Chrome renders a few frames per second (game time crawls), so the team runs 8 updates per frame.
+    await page.evaluate(() => {
+      const tm = T.g.team, u = tm.update.bind(tm);
+      tm.update = (dt, f, p, t) => { for (let k = 0; k < 8; k++) u(dt, f, p, t); };
+    });
+    let shot = false;
+    const moves = [];
+    const log = [];
+    for (let k = 0; k < 8; k++) {
+      const n = k === 0 ? plan.steps : 40;
+      await clickAction(page, 'Maju … langkah');
+      await page.locator('.dialog-box label:nth-of-type(1) input').fill(String(n));
+      await page.getByRole('button', { name: 'Simpan' }).click();
+      moves.push(n);
+      await page.waitForFunction(() => window.__game.team.auto || !!window.__game.mission.result, null, { timeout: 5000 });
+      const t0 = Date.now();
+      while (Date.now() - t0 < 240000) {
+        const st = await page.evaluate(() => {
+          const g = T.g, t = g.sites.summit.target;
+          return { moving: g.team.auto, result: !!g.mission.result, d: Math.round(Math.hypot(g.player.x - t[0], g.player.z - t[1])), steps: Math.round(g.pace.steps), felled: g.team.felledCount, blocked: g.team.blocked };
+        });
+        if (log.length < 200) log.push(st);
+        if (!shot && st.felled >= 6) { shot = true; await page.screenshot({ path: `${OUT}level5-felling.png` }); }
+        if (st.result || !st.moving) break;
+        await page.waitForTimeout(500);
+      }
+      if (await page.evaluate(() => !!T.result())) break;
+    }
+    const r = await waitResult(page, 3000);
+    return { plan, moves, objectives: await page.evaluate(() => T.objectives()), lastLog: log.slice(-4), result: r };
   },
 
   async 6(page) {
@@ -246,37 +298,13 @@ const levels = {
       const p = T.pos(), t = T.g.sites.final.target;
       return { az: Math.round(T.az(p[0], p[1], t[0], t[1])), legBlocks: Math.hypot(t[0] - p[0], t[1] - p[1]) };
     });
-    const res = await cutTo(page, lock.az, Math.round((lock.legBlocks * 2.5 * 133) / 100), false);
+    const res = await cutTo(page, lock.az, Math.round((lock.legBlocks * 2.5 * 133) / 100));
     return { info, edge, lock, ...res };
   },
 };
 
-/** Walks the 100 m calibration course from the green to the red flag; the mission then moves to the forest edge. */
-async function calibrate(page) {
-  const end = await page.evaluate(() => T.g.mission.calibFlags[1]);
-  await page.evaluate((e) => { T.face(T.az(T.g.player.x, T.g.player.z, e[0], e[1])); T.g.input.forceForward = true; }, end);
-  const t0 = Date.now();
-  while (Date.now() - t0 < 60000) {
-    if (await page.evaluate(() => T.g.mission.objectives[0].done)) break;
-    await page.evaluate((e) => T.face(T.az(T.g.player.x, T.g.player.z, e[0], e[1])), end);
-    await page.waitForTimeout(300);
-  }
-  await page.evaluate(() => { T.g.input.forceForward = false; });
-  await page.waitForTimeout(1500); // chunks load at the forest edge
-  return page.evaluate(() => ({ paceCount: T.g.progress.paceCount, atStart: Math.hypot(T.g.player.x - T.g.sites.forest.start[0], T.g.player.z - T.g.sites.forest.start[1]) }));
-}
-
-async function navtup(page, obstacle) {
-  // The compass azimuth is the map azimuth minus the (east) declination.
-  const lock = await page.evaluate(() => {
-    const s = T.g.sites.forest.start, t = T.g.sites.forest.target, d = T.g.mission.declination;
-    return { az: Math.round((T.az(s[0], s[1], t[0], t[1]) - d + 360) % 360), legBlocks: Math.hypot(t[0] - s[0], t[1] - s[1]) };
-  });
-  return { lock, ...(await cutTo(page, lock.az, Math.round((lock.legBlocks * 2.5 * 133) / 100), obstacle)) };
-}
-
 /** Locks the compass, places the team and cuts toward the target, steering like a compasman. */
-async function cutTo(page, az, steps, obstacle) {
+async function cutTo(page, az, steps) {
   await clickAction(page, 'Kunci kompas');
   await page.locator('.dialog-box label:nth-of-type(1) input').fill(String(az));
   await page.locator('.dialog-box label:nth-of-type(2) input').fill(String(steps));
@@ -285,7 +313,6 @@ async function cutTo(page, az, steps, obstacle) {
   await clickAction(page, 'Atur posisi tim');
   await page.evaluate(() => { T.g.input.forceForward = true; });
   const t0 = Date.now();
-  let detour = 'none';
   let blockedSeen = false;
   const log = [];
   let minD = Infinity;
@@ -302,27 +329,6 @@ async function cutTo(page, az, steps, obstacle) {
     if (st.blocked) blockedSeen = true;
     // compasman: steer back toward the bearing
     await page.evaluate((dev) => { T.g.team.steer = dev === null || Math.abs(dev) < 0.5 ? 0 : dev > 0 ? -1 : 1; }, st.dev);
-    if (obstacle && st.blocked && detour === 'none') {
-      // detour by distance, like counting paces: right 90° for 14 blocks, back on the bearing for 10,
-      // left 90° for 14 to return to the line, then resume the bearing.
-      detour = 'side';
-      const leg = async (turn, blocks) => {
-        await page.evaluate((turn) => { const tm = T.g.team; tm.turn90(turn); tm.locked = (tm.locked + 90 * turn + 360) % 360; }, turn);
-        const p0 = await page.evaluate(() => [T.g.team.lead.x, T.g.team.lead.y]);
-        const until = Date.now() + 90000;
-        while (Date.now() < until) {
-          const p = await page.evaluate(() => [T.g.team.lead.x, T.g.team.lead.y]);
-          if (Math.hypot(p[0] - p0[0], p[1] - p0[1]) >= blocks) break;
-          await page.evaluate(() => { const dev = T.g.team.deviation(); T.g.team.steer = dev === null || Math.abs(dev) < 0.5 ? 0 : dev > 0 ? -1 : 1; });
-          await page.waitForTimeout(150);
-        }
-      };
-      await leg(1, 14);
-      await leg(-1, 10);
-      await leg(-1, 14);
-      await page.evaluate(() => { const tm = T.g.team; tm.turn90(1); tm.locked = (tm.locked + 90) % 360; });
-      detour = 'done';
-    }
     // End the leg at the post, or once it is clearly past it (the distance grows again near the
     // post): then search around the end point, as the GDD's end-of-leg search.
     minD = Math.min(minD, st.d);
@@ -341,7 +347,7 @@ async function cutTo(page, az, steps, obstacle) {
   }
   await page.evaluate(() => { T.g.input.forceForward = false; });
   const r = await waitResult(page, 3000);
-  return { blockedSeen, detour, objectives: await page.evaluate(() => T.objectives()), lastLog: log.slice(-6), result: r };
+  return { blockedSeen, objectives: await page.evaluate(() => T.objectives()), lastLog: log.slice(-6), result: r };
 }
 
 // ------------------------------------------------------------------ run
